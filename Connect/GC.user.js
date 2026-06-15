@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.0.0, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.0.3, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.0.0
+// @version      3.0.3
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.0.0';
+    const VERSION       = '3.0.3';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -27,7 +27,7 @@
     const EXPAND_MAX_PASS = 40;      // Kibontási kísérletek max száma (végtelen ciklus ellen)
     const EXPAND_PASS_MS  = 180;     // Várakozás két kibontási kör között (re-render)
 
-    function log(...args)  { console.log('[GC V2]', ...args); }
+    function log(...args)  { console.log('[GC V3]', ...args); }
     function sleep(ms)     { return new Promise((r) => setTimeout(r, ms)); }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -135,6 +135,40 @@
         });
     }
 
+    function pad2(n) {
+        return String(n).padStart(2, '0');
+    }
+
+    function formatDateTimeForExport(date) {
+        return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}_${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+    }
+
+    function parseHungarianTime(raw) {
+        const m = String(raw || '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(de|du)?\b/i);
+        if (!m) return null;
+        let hours = Number(m[1]);
+        const minutes = Number(m[2]);
+        const seconds = Number(m[3] || 0);
+        const period = (m[4] || '').toLowerCase();
+        if (period === 'du' && hours < 12) hours += 12;
+        if (period === 'de' && hours === 12) hours = 0;
+        if (hours > 23 || minutes > 59 || seconds > 59) return null;
+        return { hours, minutes, seconds };
+    }
+
+    function normalizeActivityDateTime(raw) {
+        const text = String(raw || '').replace(/\s+/g, ' ').trim();
+        if (!text) return '';
+
+        const time = parseHungarianTime(text);
+        const base = new Date();
+        if (/^tegnap\b/i.test(text)) base.setDate(base.getDate() - 1);
+        else if (!/^ma\b/i.test(text)) return text;
+        if (time) base.setHours(time.hours, time.minutes, time.seconds, 0);
+        else base.setHours(0, 0, 0, 0);
+        return formatDateTimeForExport(base);
+    }
+
     function dispatchClick(el) {
         if (!el) return;
         try {
@@ -175,7 +209,8 @@
         if (timeEl) {
             const raw = textOf(timeEl);
             const m = raw.match(/Időpont:\s*(.+?)(?:\s+[A-Z]+[+\-]\d+:\d+|$)/);
-            result.dateTime = m ? m[1].trim() : raw.replace(/rögzítette:.*?Időpont:\s*/, '').trim();
+            const rawDateTime = m ? m[1].trim() : raw.replace(/rögzítette:.*?Időpont:\s*/, '').trim();
+            result.dateTime = normalizeActivityDateTime(rawDateTime);
         }
 
         const locEl = q('ActivityMetaInfo_locationText');
@@ -520,6 +555,7 @@
         const order = [];
         const map = new Map();
         for (const { section, label, value } of stats) {
+            if (/^Távolság$/i.test(section || '') && /^Távolság$/i.test(label || '')) continue;
             const key = section || 'Egyéb';
             if (!map.has(key)) { map.set(key, []); order.push(key); }
             map.get(key).push(`${label}: ${value}`);
@@ -725,7 +761,8 @@
             });
 
             // 4. Letöltés
-            const filename = `${activityId}.md`;
+            const filenamePrefix = domMeta.dateTime ? `${domMeta.dateTime.slice(0, 10)}_` : '';
+            const filename = `${filenamePrefix}${activityId}.md`;
             const ok = downloadOrOpenMd(filename, md);
             setStatus(ok ? `✅ Kész: ${filename}` : '⚠️ A letöltés nem indult el', !ok);
         } catch (err) {
