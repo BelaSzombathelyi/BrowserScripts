@@ -857,7 +857,7 @@
 
     function init() {
         if (!/\/app\/activity\/\d+/.test(location.pathname)) return;
-        const MAX_WAIT = 30000;
+        const MAX_WAIT = 30010;
         const POLL = 400;
         let elapsed = 0;
         const check = () => {

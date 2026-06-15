@@ -1,0 +1,20 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Security: host userscript on localhost:3001",
+            "type": "shell",
+            "command": "python3 -m http.server 3001",
+            "options": {
+                "cwd": "${workspaceFolder}/Security"
+            },
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        }
+    ]
+}
