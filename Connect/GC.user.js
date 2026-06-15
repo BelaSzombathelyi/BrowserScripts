@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.0.3, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.0.6, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.0.3
+// @version      3.0.6
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.0.3';
+    const VERSION       = '3.0.6';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -110,6 +110,11 @@
         if (/megváltoztatja a tevékenységtípust|a rendszer balesetet érzékelt|mégse|tovább/.test(v)) return true;
         if (v.length > 120) return true;
         return false;
+    }
+
+    function formatCaloriesKcal(value) {
+        const text = String(value || '').replace(/\s*kcal\b/i, '').replace(/,/g, '').trim();
+        return text ? `${text} kcal` : '';
     }
 
     function isVisible(el) {
@@ -535,7 +540,7 @@
     // ────────────────────────────────────────────────────────────────────────
 
     /** A fejléc meta-sorai (csak DOM-ból; Garmin API nélkül) */
-    function buildSummaryLines(activityId, domMeta, headerStats) {
+    function buildSummaryLines(activityId, domMeta, headerStats, stats) {
         const lines = [];
         if (activityId)        lines.push(`Aktivitás ID: ${activityId}`);
         // Sport profil: az iOS DOM-ból nem kinyerhető megbízhatóan (ActivityMetaInfo_* nem létezik / junk)
@@ -544,8 +549,15 @@
         for (const { label, value } of headerStats) {
             if (/^időpont$|^helyszín$/i.test(label)) continue;
             if (isNoisyHeaderLine(label, value)) continue;
+            if (/^Kalóriaszám$/i.test(label)) {
+                const calories = formatCaloriesKcal(value);
+                if (calories) lines.push(`${label}: ${calories}`);
+                continue;
+            }
             lines.push(`${label}: ${value}`);
         }
+        const activeCalories = findStatValue(stats, /Táplálék- és folyadékbeviteli adatok/i, /^Aktív kalória$/i);
+        if (activeCalories) lines.push(`Aktív kalória: ${formatCaloriesKcal(activeCalories)}`);
         return lines;
     }
 
@@ -556,6 +568,7 @@
         const map = new Map();
         for (const { section, label, value } of stats) {
             if (/^Távolság$/i.test(section || '') && /^Távolság$/i.test(label || '')) continue;
+            if (/^Táplálék- és folyadékbeviteli adatok$/i.test(section || '')) continue;
             const key = section || 'Egyéb';
             if (!map.has(key)) { map.set(key, []); order.push(key); }
             map.get(key).push(`${label}: ${value}`);
@@ -567,6 +580,60 @@
     function findStatValue(stats, sectionRe, labelRe) {
         const hit = (stats || []).find((s) => sectionRe.test(s.section || '') && labelRe.test(s.label || ''));
         return hit ? hit.value : '';
+    }
+
+    /**
+     * A kibontott Időközök tábla kettébontása:
+     *   - intervals: a becsukott (összefoglaló) nézet sorai → tartomány-sorok
+     *     (pl. „3 - 8") + az olyan egyedi sorok, amelyeket nem fed le tartomány
+     *     (pl. 1, 2, 9, 14, 15, bemelegítés, áttekintés).
+     *   - laps: a tényleges egyedi körök → minden NEM tartomány-sor (a kibontáskor
+     *     megjelenő gyerek-sorok + az amúgy sem lenyitható sorok).
+     * A „Kör" oszlop alapján dől el, hogy egy sor tartomány-e (pl. „3 - 8").
+     */
+    function splitLapsTable(splits) {
+        if (!splits || !splits.rows || !splits.rows.length) return null;
+        const { headers, rows } = splits;
+        let korIdx = headers.findIndex((h) => /^Kör$/i.test(String(h || '').trim()));
+        if (korIdx < 0) korIdx = 2; // a „Kör" oszlop tipikus pozíciója
+
+        const rangeRe  = /^(\d+)\s*[-–—]\s*(\d+)$/;
+        const singleRe = /^(\d+)$/;
+
+        const intervals = [];
+        const laps = [];
+        let activeRange = null;
+
+        for (const row of rows) {
+            const kor = String(row[korIdx] || '').trim();
+            const range = kor.match(rangeRe);
+            if (range) {
+                // Tartomány-sor (összecsukott szülő) → csak az intervallumokba
+                activeRange = [Number(range[1]), Number(range[2])];
+                intervals.push(row);
+                continue;
+            }
+
+            const single = kor.match(singleRe);
+            const n = single ? Number(single[1]) : null;
+            const isChild = activeRange && n != null && n >= activeRange[0] && n <= activeRange[1];
+
+            if (isChild) {
+                // Kibontáskor megjelenő gyerek-sor → csak a körökbe
+                laps.push(row);
+                if (n === activeRange[1]) activeRange = null;
+            } else {
+                // Önálló sor (nem fedi tartomány) → mindkét táblába
+                activeRange = null;
+                intervals.push(row);
+                laps.push(row);
+            }
+        }
+
+        return {
+            intervals: { headers, rows: intervals },
+            laps:      { headers, rows: laps },
+        };
     }
 
     function buildMarkdown({ activityId, splits, stats, domName, domMeta, domNotes, domComments, headerStats }) {
@@ -581,12 +648,8 @@
         sections.push(`# Edzés: ${headerParts.join(' | ') || '–'}`);
 
         // ── Meta összefoglaló (ID, sport, időpont, helyszín, fejléc-statok) ──
-        const summaryLines = buildSummaryLines(activityId, domMeta, headerStats);
+        const summaryLines = buildSummaryLines(activityId, domMeta, headerStats, stats);
         if (summaryLines.length) sections.push(summaryLines.join('\n'));
-
-        // ── Részletes statisztikák (StatsBlock szekciók) ────────────────────
-        const statsMd = buildStatsSections(stats);
-        if (statsMd) sections.push(`## Statisztikák\n\n${statsMd}`);
 
         // ── Megjegyzések (Garmin saját jegyzet) ─────────────────────────────
         if (domNotes?.trim()) sections.push(`### Megjegyzések\n\n${domNotes}`);
@@ -604,8 +667,23 @@
 
         // ── Körök / Időközök (a kibontott DOM tábla minden oszlopa) ──────────
         if (splits && splits.rows.length > 0) {
-            sections.push(`## Körök\n\n${mdTable(splits.headers, splits.rows)}`);
+            const split = splitLapsTable(splits);
+            if (split) {
+                if (split.intervals.rows.length > 0) {
+                    sections.push(`## Edzésintervallumok\n\n${mdTable(split.intervals.headers, split.intervals.rows)}`);
+                }
+                if (split.laps.rows.length > 0) {
+                    const lapsNote = 'Nem feltétlenül egyenletes km-ek: terepfutásnál a felhasználó nagyon gyakran a tempóváltásoknál is új kört indít.';
+                    sections.push(`## Körök\n\n${lapsNote}\n\n${mdTable(split.laps.headers, split.laps.rows)}`);
+                }
+            } else {
+                sections.push(`## Körök\n\n${mdTable(splits.headers, splits.rows)}`);
+            }
         }
+
+        // ── Részletes statisztikák (StatsBlock szekciók) ────────────────────
+        const statsMd = buildStatsSections(stats);
+        if (statsMd) sections.push(`## Statisztikák\n\n${statsMd}`);
 
         return sections.join('\n\n') + '\n';
     }
