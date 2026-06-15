@@ -9,3 +9,8 @@ A fejlesztést mindig a Connect/GC.user.js fájllon kell elvégezni, és mentés
 
 ## Optimalizálás
 Magyarul legyen, lehet "cadance_avg" típúsú rövidítéseket, tocken optimalizálás szempontjából bevezetni.
+
+# Referenciák
+
+Vágyott cél fájlra nagy részére, egy példa: Connect/references/cél.md
+A 'Connect/references/*.webarchive' -okban látsz iOS-ről mentett weboldal példányokat, így könnyebb átnézni, hogy mi áll rendelkezésre.
