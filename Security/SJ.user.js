@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Security Journey → Markdown (v0.1.1)
+// @name         Security Journey → Markdown (v0.1.2)
 // @namespace    https://my.securityjourney.com/
-// @version      0.1.1
+// @version      0.1.2
 // @description  Security Journey (my.securityjourney.com) Knowledge Assessment kérdés kinyerése Markdown fájlba. Egy kattintással letölti az aktuális kérdést és a válaszlehetőségeket MD formátumban, amit be lehet adni egy LLM-nek (ChatGPT, Perplexity) fordításhoz/tanuláshoz. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://my.securityjourney.com/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION    = '0.1.1';
+    const VERSION    = '0.1.2';
     const OVERLAY_ID = 'sj-v0-overlay';
     const STYLE_ID   = 'sj-v0-style';
     const BTN_ID     = 'sj-v0-btn';
@@ -27,8 +27,9 @@
     const LLM_INSTRUCTION =
         'Le kell fordítanod a kérdést és a válaszokat magyarra, mindenféle sallang ' +
         'vagy hozzátétel nélkül. NEM szabad olyat írnod, hogy „itt a magyar fordítás" ' +
-        'vagy hasonló – tényleg csak a kérdés és a válaszlehetőségek bulletpointokban.';
-
+        'vagy hasonló - tényleg csak a kérdés és a válaszlehetőségek bulletpointokban.' +
+        ' Ne mond meg a megfejtést, amíg nem kérik.';
+    
     function log(...args) { console.log('[SJ V0]', ...args); }
 
     // ────────────────────────────────────────────────────────────────────────
