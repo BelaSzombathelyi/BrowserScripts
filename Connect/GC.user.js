@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.0.6, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.0.7, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.0.6
+// @version      3.0.7
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.0.6';
+    const VERSION       = '3.0.7';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -148,6 +148,17 @@
         return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}_${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
     }
 
+    // Magyar hónap- és napnevek (kisbetűsen kulcsolva, ékezetekkel)
+    const HU_MONTHS = {
+        'január': 1, 'február': 2, 'március': 3, 'április': 4,
+        'május': 5, 'június': 6, 'július': 7, 'augusztus': 8,
+        'szeptember': 9, 'október': 10, 'november': 11, 'december': 12,
+    };
+    const HU_WEEKDAYS = {
+        'vasárnap': 0, 'hétfő': 1, 'kedd': 2, 'szerda': 3,
+        'csütörtök': 4, 'péntek': 5, 'szombat': 6,
+    };
+
     function parseHungarianTime(raw) {
         const m = String(raw || '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(de|du)?\b/i);
         if (!m) return null;
@@ -161,17 +172,51 @@
         return { hours, minutes, seconds };
     }
 
+    function applyTime(date, time) {
+        if (time) date.setHours(time.hours, time.minutes, time.seconds, 0);
+        else date.setHours(0, 0, 0, 0);
+        return date;
+    }
+
     function normalizeActivityDateTime(raw) {
         const text = String(raw || '').replace(/\s+/g, ' ').trim();
         if (!text) return '';
 
-        const time = parseHungarianTime(text);
+        // A pontos idő mindig az „@" után áll (pl. „… @ 5:00 DU").
+        // Az „@" utáni részből parszoljuk, hogy az időzóna-offset
+        // (pl. „(UTC+02:00)") 02:00 értékét NE keverjük össze a valós idővel.
+        const atIdx = text.lastIndexOf('@');
+        const timePart = atIdx >= 0 ? text.slice(atIdx + 1) : text;
+        const time = parseHungarianTime(timePart);
+
+        // 1) Abszolút dátum: „Június 14, 2026 @ 9:26 DE"
+        const abs = text.match(/([A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű]+)\s+(\d{1,2}),?\s+(\d{4})/);
+        if (abs && HU_MONTHS[abs[1].toLowerCase()]) {
+            const month = HU_MONTHS[abs[1].toLowerCase()];
+            const day = Number(abs[2]);
+            const year = Number(abs[3]);
+            const base = new Date(year, month - 1, day);
+            return formatDateTimeForExport(applyTime(base, time));
+        }
+
+        // 2) Relatív nap: a nap megnevezése közvetlenül az „@" előtt áll.
+        const beforeAt = atIdx >= 0 ? text.slice(0, atIdx) : text;
+        const dayToken = (beforeAt.trim().split(/\s+/).pop() || '').toLowerCase();
         const base = new Date();
-        if (/^tegnap\b/i.test(text)) base.setDate(base.getDate() - 1);
-        else if (!/^ma\b/i.test(text)) return text;
-        if (time) base.setHours(time.hours, time.minutes, time.seconds, 0);
-        else base.setHours(0, 0, 0, 0);
-        return formatDateTimeForExport(base);
+        if (dayToken === 'ma') {
+            // ma – nincs eltolás
+        } else if (dayToken === 'tegnap') {
+            base.setDate(base.getDate() - 1);
+        } else if (Object.prototype.hasOwnProperty.call(HU_WEEKDAYS, dayToken)) {
+            // A hétköznapnév mindig a múlt heti előfordulásra utal
+            // (ha ma lenne, „Ma" jelenne meg), ezért az eltolás 1–7 nap.
+            let diff = (base.getDay() - HU_WEEKDAYS[dayToken] + 7) % 7;
+            if (diff === 0) diff = 7;
+            base.setDate(base.getDate() - diff);
+        } else {
+            return text; // ismeretlen formátum – változatlanul visszaadjuk
+        }
+        return formatDateTimeForExport(applyTime(base, time));
     }
 
     function dispatchClick(el) {
@@ -839,7 +884,11 @@
             });
 
             // 4. Letöltés
-            const filenamePrefix = domMeta.dateTime ? `${domMeta.dateTime.slice(0, 10)}_` : '';
+            const exportRe = /^\d{4}-\d{2}-\d{2}_\d{2}:\d{2}:\d{2}$/;
+            const safeDateTime = exportRe.test(domMeta.dateTime)
+                ? domMeta.dateTime.replace(/:/g, '-')
+                : '';
+            const filenamePrefix = safeDateTime ? `${safeDateTime}_` : '';
             const filename = `${filenamePrefix}${activityId}.md`;
             const ok = downloadOrOpenMd(filename, md);
             setStatus(ok ? `✅ Kész: ${filename}` : '⚠️ A letöltés nem indult el', !ok);
