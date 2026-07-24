@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.5.0, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.5.1, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.5.0
+// @version      3.5.1
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.5.0';
+    const VERSION       = '3.5.1';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -106,6 +106,16 @@
     function textOf(el) {
         if (!el) return '';
         return (el.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+
+    /** A `textContent`-tel ellentétben a rejtett (pl. display:none-os) leszármazottak
+     *  szövegét NEM tartalmazza – ez kell ahhoz, hogy egy éppen látható, de a
+     *  „tartomány" szót csak egy rejtett belső dialógusban tartalmazó szekciót
+     *  (pl. Kivitelezési pontszám) ne illesszünk össze tévesen a Zónák panellel. */
+    function visibleTextOf(el) {
+        if (!el) return '';
+        const txt = el.innerText;
+        return (txt != null ? txt : (el.textContent || '')).replace(/\s+/g, ' ').trim();
     }
 
     function directTextOf(el) {
@@ -267,13 +277,36 @@
 
     /** Az elem legközelebbi, „panelnek" tekinthető őse – akkor kell, ha a tabpanel
      *  (role="tabpanel" / rögzített #tab-* id) egyáltalán nem található meg, de a
-     *  ténylegesen renderelt tartalom (pl. IntervalsTable sor) igen. */
+     *  ténylegesen renderelt tartalom (pl. IntervalsTable sor) igen.
+     *  FONTOS: a `[class*="Tab"]` szelektor korábban téves találatot adott, mert az
+     *  „IntervalsTable_tableRow"/„IntervalsTable_table" osztálynevek is tartalmazzák
+     *  a „Tab" alsztringet (a „Table" szó része), így az Element.closest() – ami
+     *  előbb saját magát is megvizsgálja – rögtön magát a sort (vagy a táblát)
+     *  adta vissza „panel"-ként ahelyett, hogy feljebb keresett volna a valódi,
+     *  a szűrőt és a táblát is magába foglaló konténerig. Ezért itt csak a
+     *  ténylegesen tab-panelre utaló, specifikusabb osztályneveket keressük. */
     function closestPane(el) {
         if (!el) return null;
-        return el.closest('[role="tabpanel"], [class*="Panel"], [class*="pane" i], [class*="Tab"], section, article')
+        return el.closest('[role="tabpanel"], [class*="TabPanel"], [class*="Panel"], [class*="pane" i], section, article')
             || el.closest('table')?.parentElement
             || el.parentElement
             || el;
+    }
+
+    /** Ha a levezetett „panel" túl szűk (pl. csak a táblát tartalmazza, a felette lévő
+     *  szűrőt nem), lépegetünk felfelé a DOM-ban, amíg a `predicate` igazzá nem válik,
+     *  vagy el nem érjük a lépéskorlátot – így a forceAllFilter/scrapeSplitsTable
+     *  számára is elérhetővé válik a szűrő és a tábla közös őse. */
+    function widenPaneUntil(pane, predicate, maxSteps = 5) {
+        let node = pane;
+        let steps = 0;
+        while (node && !predicate(node) && steps < maxSteps) {
+            const parent = node.parentElement;
+            if (!parent || parent === document.body) break;
+            node = parent;
+            steps++;
+        }
+        return node || pane;
     }
 
     function dispatchClick(el) {
@@ -475,7 +508,18 @@
                 const contentEl = document.querySelector(
                     '[class*="IntervalsTable_tableRow"], [class*="ListTable_tableRow"]',
                 );
-                if (contentEl) pane = closestPane(contentEl);
+                if (contentEl) {
+                    pane = closestPane(contentEl);
+                    // A closestPane által talált ős még nem biztos, hogy tartalmazza a
+                    // „Lépés típusa" szűrőt is (az gyakran a tábla fölötti testvér-elem) –
+                    // lépegessünk feljebb, amíg a szűrő is a panel része nem lesz.
+                    if (pane) {
+                        pane = widenPaneUntil(
+                            pane,
+                            (node) => !!node.querySelector('[class*="ActivityIntervals_intervalsFilter"]'),
+                        );
+                    }
+                }
             }
             const active = isTabActivated(tabBtn);
             const hasRows = pane && (
@@ -822,17 +866,23 @@
             // A panel id-je mobilon React useId-vel generált, ezért elsőként a tab gomb
             // aria-controls attribútuma alapján, majd a rögzített id-vel/látható tabpanel-lel keresünk.
             let pane = getTabPaneFromButton(tabBtn) || findZonesPane() || findVisibleTabPanel();
-            if (!pane || !/tartomány|zone/i.test(pane.textContent || '')) {
+            if (!pane || !/tartomány|zone/i.test(visibleTextOf(pane))) {
                 // Ha egyik fenti sem hozott „tartomány" szöveget tartalmazó panelt,
                 // essünk vissza a ténylegesen megjelent tartalom legközelebbi ősére
                 // (a legkisebb – legspecifikusabb – szöveges egyezés alapján).
+                // FONTOS: `textContent` a rejtett (pl. display:none-os önértékelő
+                // dialógus) leszármazottak szövegét is tartalmazza, ezért egy attól
+                // teljesen független, épp látható szekció (pl. a Kivitelezési
+                // pontszám doboz, ha a rejtett dialógusában szerepel a „tartomány"
+                // szó) is hamisan illeszkedhetne. Az `innerText` ezzel szemben csak
+                // a ténylegesen látható szöveget adja vissza.
                 const matches = Array.from(document.querySelectorAll('div, section, article'))
-                    .filter((el) => isVisible(el) && /tartomány/i.test(el.textContent || ''));
-                matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+                    .filter((el) => isVisible(el) && /tartomány/i.test(visibleTextOf(el)));
+                matches.sort((a, b) => visibleTextOf(a).length - visibleTextOf(b).length);
                 if (matches[0]) pane = closestPane(matches[0]);
             }
             const active = isTabActivated(tabBtn);
-            const content = pane ? (pane.textContent || '') : '';
+            const content = pane ? visibleTextOf(pane) : '';
             if (pane && isVisible(pane) && /tartomány|zone/i.test(content)) return pane;
             if (!active) { dispatchClick(tabBtn); dispatchActivateKeys(tabBtn); }
             await sleep(200);
