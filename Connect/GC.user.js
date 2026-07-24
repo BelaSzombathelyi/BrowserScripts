@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.0.9, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.1.0, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.0.9
+// @version      3.1.0
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.0.9';
+    const VERSION       = '3.1.0';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -27,8 +27,40 @@
     const EXPAND_MAX_PASS = 40;      // Kibontási kísérletek max száma (végtelen ciklus ellen)
     const EXPAND_PASS_MS  = 180;     // Várakozás két kibontási kör között (re-render)
 
+    // Ha true, hiba / „nem található elem" esetén extra diagnosztikai infót
+    // (időbélyeg, kontextus, akár rész-DOM HTML) gyűjtünk, és ezt a generált
+    // MD fájl végéhez fűzzük egy „Debug napló" szekcióban, hogy könnyebb
+    // legyen a hibák utólagos javítása.
+    const DEBUG = true;
+
     function log(...args)  { console.log('[GC V3]', ...args); }
     function sleep(ms)     { return new Promise((r) => setTimeout(r, ms)); }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Debug napló (csak DEBUG=true esetén gyűjt)
+    // ────────────────────────────────────────────────────────────────────────
+
+    const debugEntries = [];
+
+    /** Egy elem (rész-)HTML-je, levágva, hogy ne dagassza fel túlzottan az MD-t */
+    function htmlSnippet(el, maxLen = 1500) {
+        if (!el) return '';
+        try {
+            let html = el.outerHTML || '';
+            if (html.length > maxLen) html = `${html.slice(0, maxLen)}\n…(levágva, teljes hossz: ${html.length} kar.)…`;
+            return html;
+        } catch {
+            return '';
+        }
+    }
+
+    /** Diagnosztikai bejegyzés hozzáadása (hiba / nem talált elem esetén) */
+    function dlog(label, detail, el) {
+        if (!DEBUG) return;
+        const entry = { time: new Date().toISOString(), label, detail: detail || '', html: el ? htmlSnippet(el) : '' };
+        debugEntries.push(entry);
+        log('[DEBUG]', label, detail || '', el || '');
+    }
 
     // ────────────────────────────────────────────────────────────────────────
     // Markdown segédfüggvények
@@ -245,6 +277,7 @@
         }
         const label = document.querySelector('span[class*="InlineEdit_label"]');
         if (label) return label.getAttribute('title') || textOf(label);
+        dlog('scrapeActivityName: nincs találat', 'Sem az InlineActivityNameEdit_activityNameWrapper, sem az InlineEdit_label szelektor nem talált nevet.', document.querySelector('[class*="ActivityHeaderContainer_"]'));
         return '';
     }
 
@@ -261,10 +294,13 @@
             const m = raw.match(/Időpont:\s*(.+?)(?:\s+[A-Z]+[+\-]\d+:\d+|$)/);
             const rawDateTime = m ? m[1].trim() : raw.replace(/rögzítette:.*?Időpont:\s*/, '').trim();
             result.dateTime = normalizeActivityDateTime(rawDateTime);
+        } else {
+            dlog('scrapeActivityMeta: nincs ActivityMetaInfo_activityTime', '', document.querySelector('[class*="ActivityMetaInfo_"]'));
         }
 
         const locEl = q('ActivityMetaInfo_locationText');
         if (locEl) result.location = textOf(locEl);
+        else dlog('scrapeActivityMeta: nincs ActivityMetaInfo_locationText', '', document.querySelector('[class*="ActivityMetaInfo_"]'));
 
         return result;
     }
@@ -272,7 +308,10 @@
     /** „Megjegyzések" – a Garmin saját jegyzet textarea-ja */
     function scrapeActivityNotes() {
         const noteEl = q('ActivityNotes_noteContainer');
-        if (!noteEl) return '';
+        if (!noteEl) {
+            dlog('scrapeActivityNotes: nincs ActivityNotes_noteContainer', '');
+            return '';
+        }
         const ta = noteEl.querySelector('textarea');
         if (ta && ta.value) return ta.value.trim();
         // A h3 fejlécet (pl. „Megjegyzések") ne vegyük bele
@@ -289,7 +328,10 @@
         const section = document.getElementById('activityCommentsViewPlaceholder')
                      || q('ActivityPageCommentSection_comments')
                      || q('ActivityPageCommentSection_container');
-        if (!section) return [];
+        if (!section) {
+            dlog('scrapeComments: nincs komment szekció', '');
+            return [];
+        }
         const items = qAll('CommentItem_commentWrapper', section);
         const comments = [];
         for (const item of items) {
@@ -346,6 +388,7 @@
         const tabBtn = document.querySelector('#tabSplitsId');
         if (!tabBtn) {
             setStatus('ℹ️ „Időközök" tab nem elérhető ezen az aktivitáson');
+            dlog('openSplitsTab: nincs #tabSplitsId', '', document.querySelector('[role="tablist"]'));
             return null;
         }
         setStatus('⏳ „Időközök" tab megnyitása…');
@@ -354,8 +397,9 @@
         let pane = null;
         try {
             pane = await waitForElement('#tab-splits', SPLITS_WAIT_MS);
-        } catch {
+        } catch (err) {
             setStatus('⚠️ Az „Időközök" panel nem jelent meg');
+            dlog('openSplitsTab: #tab-splits nem jelent meg', err?.message || String(err), document.body);
             return null;
         }
         // Várjuk meg, hogy legyen tartalom (IntervalsTable / ListTable sor vagy table)
@@ -366,15 +410,26 @@
              || pane.querySelector('table tbody tr')) break;
             await sleep(200);
         }
+        if (!pane.querySelector('[class*="IntervalsTable_tableRow"]')
+         && !pane.querySelector('[class*="ListTable_tableRow"]')
+         && !pane.querySelector('table tbody tr')) {
+            dlog('openSplitsTab: időtúllépés, nincs sor a panelben', '', pane);
+        }
         return pane;
     }
 
     /** „Lépés típusa" szűrő → „Összes" (ALL), hogy minden kör látszódjon */
     async function forceAllFilter(pane, setStatus) {
         const filter = pane.querySelector('[class*="ActivityIntervals_intervalsFilter"]');
-        if (!filter) return;
+        if (!filter) {
+            dlog('forceAllFilter: nincs ActivityIntervals_intervalsFilter', '', pane);
+            return;
+        }
         const dropdownBtn = filter.querySelector('button[aria-haspopup="listbox"], [class*="Dropdown_dropdownButton"]');
-        if (!dropdownBtn) return;
+        if (!dropdownBtn) {
+            dlog('forceAllFilter: nincs dropdown gomb a szűrőben', '', filter);
+            return;
+        }
 
         // Ha már „Összes" van kiválasztva, ne nyúljunk hozzá
         const current = textOf(dropdownBtn).toLowerCase();
@@ -388,6 +443,7 @@
             dispatchClick(allOpt);
             await sleep(300);
         } else {
+            dlog('forceAllFilter: nincs "ALL" opció a legördülőben', '', dropdownBtn.parentElement || dropdownBtn);
             // Zárjuk vissza a dropdown-t, ha nem találtuk az opciót
             dispatchClick(dropdownBtn);
         }
@@ -405,6 +461,7 @@
         const table = pane.querySelector('[class*="IntervalsTable_table"]') || pane.querySelector('table');
         if (!table) {
             setStatus('⚠️ Nincs tábla az Időközök panelben');
+            dlog('expandAllRows: nincs tábla', '', pane);
             return 0;
         }
         const rowSel = '[class*="IntervalsTable_tableRow"]';
@@ -509,6 +566,7 @@
         const stillClosed = finalParents.filter((r) => !isExpanded(r));
         if (stillClosed.length > 0) {
             setStatus(`⚠️ ${stillClosed.length} szülő-sor maradt lezárva (${total} lett kibontva)`);
+            dlog(`expandAllRows: ${stillClosed.length} szülő-sor maradt lezárva`, `Kibontva: ${total}`, stillClosed[0]);
         } else {
             setStatus(`✅ Összes szülő-sor kibontva (${total})`);
         }
@@ -578,6 +636,7 @@
             if (rows.length > 0) return dropEmptyColumns(headers, rows);
         }
 
+        dlog('scrapeSplitsTable: nem sikerült egyetlen táblázat-struktúrát sem felismerni', '', pane);
         return null;
     }
 
@@ -643,6 +702,7 @@
         const tabBtn = findZonesTabButton();
         if (!tabBtn) {
             setStatus('ℹ️ „Zónákban töltött idő" tab nem elérhető ezen az aktivitáson');
+            dlog('openZonesTab: nincs zóna tab gomb', '', document.querySelector('[role="tablist"]'));
             return null;
         }
         setStatus('⏳ „Zónákban töltött idő" tab megnyitása…');
@@ -658,6 +718,7 @@
             await sleep(200);
         }
         setStatus('⚠️ A „Zónákban töltött idő" panel nem jelent meg');
+        dlog('openZonesTab: időtúllépés, panel nem jelent meg', '', findZonesPane() || tabBtn);
         return null;
     }
 
@@ -712,7 +773,9 @@
         const pane = await openZonesTab(setStatus);
         if (!pane) return null;
         setStatus('⏳ Zónákban töltött idő beolvasása…');
-        return scrapeZones(pane);
+        const zones = scrapeZones(pane);
+        if (!zones || zones.length === 0) dlog('scrapeZones: nem sikerült egyetlen zóna-szekciót sem felismerni', '', pane);
+        return zones;
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -953,6 +1016,23 @@
         const statsMd = buildStatsSections(stats, splits);
         if (statsMd) sections.push(`## Statisztikák\n\n${statsMd}`);
 
+        // ── Debug napló (csak DEBUG=true esetén, ha volt hiba / nem talált elem) ──
+        if (DEBUG && debugEntries.length > 0) {
+            const debugParts = [
+                '## Debug napló',
+                '_Ez a szekció csak akkor jelenik meg, ha a script tetején a `DEBUG` kapcsoló `true`. '
+                + 'Hibakereséshez tartalmazza az összes olyan esetet, amikor egy várt DOM elem nem volt megtalálható, '
+                + 'vagy hiba történt – időbélyeggel és, ha elérhető, a releváns (rész-)DOM HTML-jével.'
+                + ' A script javításához nyugodtan mellékeld ezt a szekciót._',
+            ];
+            for (const entry of debugEntries) {
+                debugParts.push(`### ${entry.time} — ${entry.label}`);
+                if (entry.detail) debugParts.push(entry.detail);
+                if (entry.html) debugParts.push(`\`\`\`html\n${entry.html}\n\`\`\``);
+            }
+            sections.push(debugParts.join('\n\n'));
+        }
+
         return sections.join('\n\n') + '\n';
     }
 
@@ -1121,6 +1201,16 @@
         } catch (err) {
             setStatus(`⚠️ Hiba: ${err?.message || err}`, true);
             log('Export hiba:', err);
+            dlog('runExport: váratlan hiba', err?.stack || String(err?.message || err));
+            // DEBUG esetén a hiba ellenére is próbáljunk letölteni egy debug-naplót,
+            // hogy a hibakereséshez legyen mihez nyúlni.
+            if (DEBUG && debugEntries.length > 0) {
+                const debugMd = buildMarkdown({
+                    activityId: getActivityId(), splits: null, zones: null, stats: [],
+                    domName: '', domMeta: {}, domNotes: '', domComments: [], headerStats: [],
+                });
+                downloadOrOpenMd(`debug_${getActivityId() || 'hiba'}.md`, debugMd);
+            }
         } finally {
             btn.disabled = false;
         }

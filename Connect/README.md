@@ -10,6 +10,9 @@ A fejlesztést mindig a Connect/GC.user.js fájlon kell elvégezni, és mentés 
 ## Optimalizálás
 Magyarul legyen, lehet "cadance_avg" típusú rövidítéseket tokenoptimalizálás szempontjából bevezetni.
 
+## Debug
+A fájl tetején van egy `DEBUG` kapcsoló (jelenleg `true`). Ha be van kapcsolva, hiba vagy nem talált DOM elem esetén a script extra diagnosztikai infót (időbélyeg, kontextus, rész-DOM HTML) gyűjt, és ezt a generált MD fájl végéhez fűzi egy „Debug napló" szekcióban – ez segíti a hibák utólagos javítását.
+
 # Referenciák
 
 Vágyott cél fájlra nagy részére egy példa: Connect/references/cél.md
