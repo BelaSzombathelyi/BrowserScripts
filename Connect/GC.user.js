@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.5.2, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.5.3, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.5.2
+// @version      3.5.3
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.5.2';
+    const VERSION       = '3.5.3';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -920,7 +920,12 @@
      * Formátum soronként (Garmin Connect):
      *   „<Szekció neve>-tartományok"
      *   „Tartomány 5 > 156 üt/p • Maximális"
-     *   „2:51 5%"
+     *   „2:51” és „5%” – az idő és az arány gyakran KÜLÖN sorként jelenik meg
+     *   (a TimeInZonesChart_progressBarContainer flex-elrendezésű, és az
+     *   innerText a flex-item span-eket is önálló sorként adja vissza,
+     *   annak ellenére, hogy vizuálisan egymás mellett, ugyanabban a
+     *   flex-„sorban” látszanak) – ezért mindkét esetet (egy közös sor vagy
+     *   két külön sor) kezelnünk kell.
      * @returns {{title: string, rows: string[][]}[]}
      */
     function scrapeZones(pane) {
@@ -930,6 +935,8 @@
         const sectionRe = /tartományok$/i;
         const zoneLineRe = /^Tartomány\s+(\d+)\s+(.+?)(?:\s+(\d{1,3}:\d{2}(?::\d{2})?)\s+(\d{1,3})\s*%)?$/i;
         const timePctRe = /^(\d{1,3}:\d{2}(?::\d{2})?)\s+(\d{1,3})\s*%$/;
+        const timeOnlyRe = /^(\d{1,3}:\d{2}(?::\d{2})?)$/;
+        const pctOnlyRe = /^(\d{1,3})\s*%$/;
 
         const sections = [];
         let current = null;
@@ -946,10 +953,33 @@
                 const desc = m[2].trim();
                 let time = m[3] || '';
                 let pct  = m[4] ? `${m[4]}%` : '';
-                if (!time) {
-                    const next = lines[i + 1] || '';
+                // Ha az idő/arány nem szerepelt a zóna-soron, nézzük meg a
+                // következő 1-2 sort: lehet egy közös „idő arány%" sor, vagy
+                // két külön sor (előbb az idő, majd az arány – lásd fenti
+                // megjegyzés a flex-item sortörésekről).
+                if (!time || !pct) {
+                    let j = i + 1;
+                    const next = lines[j] || '';
                     const tp = next.match(timePctRe);
-                    if (tp) { time = tp[1]; pct = `${tp[2]}%`; i++; }
+                    if (tp) {
+                        time = time || tp[1];
+                        pct = pct || `${tp[2]}%`;
+                        i = j;
+                    } else {
+                        const to = next.match(timeOnlyRe);
+                        const po = next.match(pctOnlyRe);
+                        if (to && !time) {
+                            time = to[1];
+                            i = j;
+                            j += 1;
+                            const after = lines[j] || '';
+                            const po2 = after.match(pctOnlyRe);
+                            if (po2 && !pct) { pct = `${po2[1]}%`; i = j; }
+                        } else if (po && !pct) {
+                            pct = `${po[1]}%`;
+                            i = j;
+                        }
+                    }
                 }
                 current.rows.push([m[1], desc, time, pct]);
             }
