@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.1.0, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.2.0, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.1.0
+// @version      3.2.0
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.1.0';
+    const VERSION       = '3.2.0';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -251,6 +251,38 @@
         return formatDateTimeForExport(applyTime(base, time));
     }
 
+    /** Bármely látható, épp aktív tabpanel (aria-hidden nélkül) megkeresése */
+    function findVisibleTabPanel() {
+        return Array.from(document.querySelectorAll('[role="tabpanel"]'))
+            .find((p) => isVisible(p) && String(p.getAttribute('aria-hidden') || '').toLowerCase() !== 'true') || null;
+    }
+
+    /** A tab gomb aria-controls attribútuma alapján a hozzá tartozó panel (a mobil oldalon
+     *  a panel-id React useId-vel generált, nem a rögzített "tab-splits"/"tab-time-in-zones"). */
+    function getTabPaneFromButton(tabBtn) {
+        const controlsId = tabBtn?.getAttribute('aria-controls');
+        if (!controlsId) return null;
+        return document.getElementById(controlsId);
+    }
+
+    /** Tab panel várakozás: elsőként aria-controls, majd a megadott fallback szelektor,
+     *  végül bármely látható tabpanel alapján. */
+    async function resolveTabPane(tabBtn, fallbackSelector, timeoutMs) {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            const byControls = getTabPaneFromButton(tabBtn);
+            if (byControls && isVisible(byControls)) return byControls;
+            if (fallbackSelector) {
+                const byFallback = document.querySelector(fallbackSelector);
+                if (byFallback && isVisible(byFallback)) return byFallback;
+            }
+            const visiblePanel = findVisibleTabPanel();
+            if (visiblePanel) return visiblePanel;
+            await sleep(200);
+        }
+        return null;
+    }
+
     function dispatchClick(el) {
         if (!el) return;
         try {
@@ -394,12 +426,12 @@
         setStatus('⏳ „Időközök" tab megnyitása…');
         dispatchClick(tabBtn);
 
-        let pane = null;
-        try {
-            pane = await waitForElement('#tab-splits', SPLITS_WAIT_MS);
-        } catch (err) {
+        // A panel id-je mobilon React useId-vel generált (nem a rögzített "tab-splits"),
+        // ezért elsőként a tab gomb aria-controls attribútuma alapján keressük.
+        const pane = await resolveTabPane(tabBtn, '#tab-splits', SPLITS_WAIT_MS);
+        if (!pane) {
             setStatus('⚠️ Az „Időközök" panel nem jelent meg');
-            dlog('openSplitsTab: #tab-splits nem jelent meg', err?.message || String(err), document.body);
+            dlog('openSplitsTab: #tab-splits nem jelent meg', '', document.body);
             return null;
         }
         // Várjuk meg, hogy legyen tartalom (IntervalsTable / ListTable sor vagy table)
@@ -710,10 +742,12 @@
 
         const start = Date.now();
         while (Date.now() - start < SPLITS_WAIT_MS) {
-            const pane = findZonesPane();
+            // A panel id-je mobilon React useId-vel generált, ezért elsőként a tab gomb
+            // aria-controls attribútuma alapján, majd a rögzített id-vel/látható tabpanel-lel keresünk.
+            const pane = getTabPaneFromButton(tabBtn) || findZonesPane() || findVisibleTabPanel();
             const active = isTabActivated(tabBtn);
             const content = pane ? (pane.textContent || '') : '';
-            if (pane && isVisible(pane) && active && /tartomány|zone/i.test(content)) return pane;
+            if (pane && isVisible(pane) && /tartomány|zone/i.test(content)) return pane;
             if (!active) dispatchClick(tabBtn);
             await sleep(200);
         }
