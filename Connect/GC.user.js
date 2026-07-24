@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.2.0, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.4.0, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.2.0
+// @version      3.4.0
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.2.0';
+    const VERSION       = '3.4.0';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -265,34 +265,45 @@
         return document.getElementById(controlsId);
     }
 
-    /** Tab panel várakozás: elsőként aria-controls, majd a megadott fallback szelektor,
-     *  végül bármely látható tabpanel alapján. */
-    async function resolveTabPane(tabBtn, fallbackSelector, timeoutMs) {
-        const start = Date.now();
-        while (Date.now() - start < timeoutMs) {
-            const byControls = getTabPaneFromButton(tabBtn);
-            if (byControls && isVisible(byControls)) return byControls;
-            if (fallbackSelector) {
-                const byFallback = document.querySelector(fallbackSelector);
-                if (byFallback && isVisible(byFallback)) return byFallback;
-            }
-            const visiblePanel = findVisibleTabPanel();
-            if (visiblePanel) return visiblePanel;
-            await sleep(200);
-        }
-        return null;
-    }
-
     function dispatchClick(el) {
         if (!el) return;
         try {
             el.scrollIntoView?.({ block: 'center' });
-            ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach((type) => {
-                el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-            });
+            el.focus?.({ preventScroll: true });
+            const rect = el.getBoundingClientRect?.() || { left: 0, top: 0, width: 0, height: 0 };
+            const clientX = rect.left + rect.width / 2;
+            const clientY = rect.top + rect.height / 2;
+            const pointerOpts = {
+                bubbles: true, cancelable: true, view: window,
+                clientX, clientY, button: 0, buttons: 1,
+                pointerId: 1, pointerType: 'mouse', isPrimary: true,
+            };
+            const mouseOpts = { bubbles: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 1 };
+            const PointerCtor = typeof PointerEvent !== 'undefined' ? PointerEvent : MouseEvent;
+            el.dispatchEvent(new PointerCtor('pointerdown', pointerOpts));
+            el.dispatchEvent(new MouseEvent('mousedown', mouseOpts));
+            el.dispatchEvent(new PointerCtor('pointerup', pointerOpts));
+            el.dispatchEvent(new MouseEvent('mouseup', mouseOpts));
+            el.dispatchEvent(new MouseEvent('click', mouseOpts));
+            el.click?.();
         } catch (clickErr) {
             try { el.click(); } catch { /* nincs mit tenni */ }
         }
+    }
+
+    /** Billentyűzet-alapú aktiválás (Enter/Space) – az ARIA tab-widgetek jelentős
+     *  része erre is hallgat, ha az egérkattintás szimulációja nem elég a
+     *  React/keretrendszer belső eseménykezelőinek eléréséhez. */
+    function dispatchActivateKeys(el) {
+        if (!el) return;
+        try {
+            el.focus?.({ preventScroll: true });
+            for (const key of ['Enter', ' ']) {
+                const opts = { bubbles: true, cancelable: true, key, code: key === ' ' ? 'Space' : 'Enter' };
+                el.dispatchEvent(new KeyboardEvent('keydown', opts));
+                el.dispatchEvent(new KeyboardEvent('keyup', opts));
+            }
+        } catch { /* nincs mit tenni */ }
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -415,28 +426,55 @@
     // Időközök tab – megnyitás, „Összes" szűrő, ÖSSZES kör kibontása, scrape
     // ────────────────────────────────────────────────────────────────────────
 
+    /** Az „Időközök" tab gombja. A rögzített `#tabSplitsId` gyakran egy inaktív,
+     *  a ténylegesen megjelenített Tabs_ komponenstől független (legacy/rejtett)
+     *  elemre mutat, ezért elsőként a látható role="tab" elemek szövege alapján
+     *  keresünk, és csak ha az nem talál semmit, esünk vissza a régi id-re. */
+    function findSplitsTabButton() {
+        const candidates = Array.from(document.querySelectorAll('[role="tab"]'));
+        const byText = candidates.find((el) => isVisible(el) && /időközök|splits/i.test(textOf(el)));
+        if (byText) return byText;
+        return document.querySelector('#tabSplitsId');
+    }
+
     /** Az „Időközök" tab gombjának megnyomása és a tartalom betöltésére várás */
     async function openSplitsTab(setStatus) {
-        const tabBtn = document.querySelector('#tabSplitsId');
+        const tabBtn = findSplitsTabButton();
         if (!tabBtn) {
             setStatus('ℹ️ „Időközök" tab nem elérhető ezen az aktivitáson');
-            dlog('openSplitsTab: nincs #tabSplitsId', '', document.querySelector('[role="tablist"]'));
+            dlog('openSplitsTab: nincs tab gomb', '', document.querySelector('[role="tablist"]'));
             return null;
         }
         setStatus('⏳ „Időközök" tab megnyitása…');
         dispatchClick(tabBtn);
 
-        // A panel id-je mobilon React useId-vel generált (nem a rögzített "tab-splits"),
-        // ezért elsőként a tab gomb aria-controls attribútuma alapján keressük.
-        const pane = await resolveTabPane(tabBtn, '#tab-splits', SPLITS_WAIT_MS);
-        if (!pane) {
+        // A panel keresése: elsőként a tab gomb aria-controls attribútuma alapján,
+        // majd a (gyakran elavult) "#tab-splits" id-vel, végül bármely látható
+        // tabpanel alapján – és amíg a gomb nem lett aktív, tovább próbálkozunk
+        // kattintással / billentyűzettel (Enter), mert egyes komponensek csak
+        // ezekre reagálnak megbízhatóan.
+        const start = Date.now();
+        let pane = null;
+        while (Date.now() - start < SPLITS_WAIT_MS) {
+            pane = getTabPaneFromButton(tabBtn) || document.querySelector('#tab-splits') || findVisibleTabPanel();
+            const active = isTabActivated(tabBtn);
+            const hasRows = pane && (
+                pane.querySelector('[class*="IntervalsTable_tableRow"]')
+                || pane.querySelector('[class*="ListTable_tableRow"]')
+                || pane.querySelector('table tbody tr')
+            );
+            if (pane && isVisible(pane) && (active || hasRows)) break;
+            if (!active) { dispatchClick(tabBtn); dispatchActivateKeys(tabBtn); }
+            await sleep(200);
+        }
+        if (!pane || !isVisible(pane)) {
             setStatus('⚠️ Az „Időközök" panel nem jelent meg');
-            dlog('openSplitsTab: #tab-splits nem jelent meg', '', document.body);
+            dlog('openSplitsTab: panel nem jelent meg', '', tabBtn);
             return null;
         }
         // Várjuk meg, hogy legyen tartalom (IntervalsTable / ListTable sor vagy table)
-        const start = Date.now();
-        while (Date.now() - start < SPLITS_WAIT_MS) {
+        const rowStart = Date.now();
+        while (Date.now() - rowStart < SPLITS_WAIT_MS) {
             if (pane.querySelector('[class*="IntervalsTable_tableRow"]')
              || pane.querySelector('[class*="ListTable_tableRow"]')
              || pane.querySelector('table tbody tr')) break;
@@ -704,13 +742,17 @@
     // Zónákban töltött idő tab – megnyitás + scrape
     // ────────────────────────────────────────────────────────────────────────
 
+    /** A „Zónákban töltött idő" tab gombja. Ugyanaz a jelenség, mint a splits
+     *  tabnál: a rögzített `#tabTimeInZonesId` gyakran egy inaktív, a tényleges
+     *  Tabs_ komponenstől független elemre mutat, ezért a látható role="tab"
+     *  szöveg alapú keresés élvez elsőbbséget. */
     function findZonesTabButton() {
-        const byId = document.querySelector('#tabTimeInZonesId');
-        if (byId) return byId;
         const candidates = Array.from(document.querySelectorAll(
-            'button, a, [role="tab"], [aria-controls="tab-time-in-zones"], [href="#tab-time-in-zones"]',
+            '[role="tab"], button, a, [aria-controls="tab-time-in-zones"], [href="#tab-time-in-zones"]',
         ));
-        return candidates.find((el) => /zónákban töltött idő|time in zones/i.test(textOf(el))) || null;
+        const byText = candidates.find((el) => isVisible(el) && /zónákban töltött idő|time in zones/i.test(textOf(el)));
+        if (byText) return byText;
+        return document.querySelector('#tabTimeInZonesId');
     }
 
     function findZonesPane() {
@@ -748,11 +790,11 @@
             const active = isTabActivated(tabBtn);
             const content = pane ? (pane.textContent || '') : '';
             if (pane && isVisible(pane) && /tartomány|zone/i.test(content)) return pane;
-            if (!active) dispatchClick(tabBtn);
+            if (!active) { dispatchClick(tabBtn); dispatchActivateKeys(tabBtn); }
             await sleep(200);
         }
         setStatus('⚠️ A „Zónákban töltött idő" panel nem jelent meg');
-        dlog('openZonesTab: időtúllépés, panel nem jelent meg', '', findZonesPane() || tabBtn);
+        dlog('openZonesTab: időtúllépés, panel nem jelent meg', '', tabBtn);
         return null;
     }
 
@@ -1066,6 +1108,10 @@
             }
             sections.push(debugParts.join('\n\n'));
         }
+
+        // ── Verzió-lábléc: mindig az MD fájl legvégén, hogy látszódjon, melyik
+        // script-verzióval készült az export ──────────────────────────────
+        sections.push(`---\n_Generálva: GC→MD v${VERSION}_`);
 
         return sections.join('\n\n') + '\n';
     }
