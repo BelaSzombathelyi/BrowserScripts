@@ -613,9 +613,34 @@
     // Zónákban töltött idő tab – megnyitás + scrape
     // ────────────────────────────────────────────────────────────────────────
 
+    function findZonesTabButton() {
+        const byId = document.querySelector('#tabTimeInZonesId');
+        if (byId) return byId;
+        const candidates = Array.from(document.querySelectorAll(
+            'button, a, [role="tab"], [aria-controls="tab-time-in-zones"], [href="#tab-time-in-zones"]',
+        ));
+        return candidates.find((el) => /zónákban töltött idő|time in zones/i.test(textOf(el))) || null;
+    }
+
+    function findZonesPane() {
+        return document.querySelector('#tab-time-in-zones')
+            || document.querySelector('[id*="time-in-zones"]')
+            || null;
+    }
+
+    function isTabActivated(el) {
+        if (!el) return false;
+        const ariaSelected = String(el.getAttribute('aria-selected') || '').toLowerCase();
+        const ariaCurrent = String(el.getAttribute('aria-current') || '').toLowerCase();
+        const classes = String(el.className || '');
+        return ariaSelected === 'true'
+            || ariaCurrent === 'true'
+            || /\b(active|selected)\b/i.test(classes);
+    }
+
     /** A „Zónákban töltött idő" tab gombjának megnyomása és a tartalom betöltésére várás */
     async function openZonesTab(setStatus) {
-        const tabBtn = document.querySelector('#tabTimeInZonesId');
+        const tabBtn = findZonesTabButton();
         if (!tabBtn) {
             setStatus('ℹ️ „Zónákban töltött idő" tab nem elérhető ezen az aktivitáson');
             return null;
@@ -623,19 +648,17 @@
         setStatus('⏳ „Zónákban töltött idő" tab megnyitása…');
         dispatchClick(tabBtn);
 
-        let pane = null;
-        try {
-            pane = await waitForElement('#tab-time-in-zones', SPLITS_WAIT_MS);
-        } catch {
-            setStatus('⚠️ A „Zónákban töltött idő" panel nem jelent meg');
-            return null;
-        }
         const start = Date.now();
         while (Date.now() - start < SPLITS_WAIT_MS) {
-            if (/tartomány/i.test(pane.textContent || '')) break;
+            const pane = findZonesPane();
+            const active = isTabActivated(tabBtn);
+            const content = pane ? (pane.textContent || '') : '';
+            if (pane && isVisible(pane) && active && /tartomány|zone/i.test(content)) return pane;
+            if (!active) dispatchClick(tabBtn);
             await sleep(200);
         }
-        return pane;
+        setStatus('⚠️ A „Zónákban töltött idő" panel nem jelent meg');
+        return null;
     }
 
     /**
