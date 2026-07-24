@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.4.0, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.5.0, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.4.0
+// @version      3.5.0
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.4.0';
+    const VERSION       = '3.5.0';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -265,6 +265,17 @@
         return document.getElementById(controlsId);
     }
 
+    /** Az elem legközelebbi, „panelnek" tekinthető őse – akkor kell, ha a tabpanel
+     *  (role="tabpanel" / rögzített #tab-* id) egyáltalán nem található meg, de a
+     *  ténylegesen renderelt tartalom (pl. IntervalsTable sor) igen. */
+    function closestPane(el) {
+        if (!el) return null;
+        return el.closest('[role="tabpanel"], [class*="Panel"], [class*="pane" i], [class*="Tab"], section, article')
+            || el.closest('table')?.parentElement
+            || el.parentElement
+            || el;
+    }
+
     function dispatchClick(el) {
         if (!el) return;
         try {
@@ -457,6 +468,15 @@
         let pane = null;
         while (Date.now() - start < SPLITS_WAIT_MS) {
             pane = getTabPaneFromButton(tabBtn) || document.querySelector('#tab-splits') || findVisibleTabPanel();
+            // Ha a fentiek egyike sem található (pl. a panelnek nincs aria-controls
+            // párja és nincs role="tabpanel" sem), essünk vissza a ténylegesen
+            // megjelent tartalom (kör-sorok) legközelebbi „panel" ősére.
+            if (!pane) {
+                const contentEl = document.querySelector(
+                    '[class*="IntervalsTable_tableRow"], [class*="ListTable_tableRow"]',
+                );
+                if (contentEl) pane = closestPane(contentEl);
+            }
             const active = isTabActivated(tabBtn);
             const hasRows = pane && (
                 pane.querySelector('[class*="IntervalsTable_tableRow"]')
@@ -761,14 +781,29 @@
             || null;
     }
 
+    /** Igaz, ha a class-lista tartalmaz „active"/„selected" szót – a CSS-modulos
+     *  osztálynevek (pl. „Tabs_active__WMhjA") aláhúzással határolják a szót, ezért
+     *  a \b (word-boundary) regex nem elég: az „_" is szóalkotó karakternek számít,
+     *  így pl. „Tabs_active__WMhjA" nem illeszkedne \bactive\b-re. Ehelyett a
+     *  class-tokeneket csak betűk mentén daraboljuk szét. */
+    function hasActiveClassToken(classes) {
+        return String(classes || '')
+            .split(/\s+/)
+            .some((token) => token
+                .split(/[^a-zA-Z]+/)
+                .some((word) => /^(active|selected)$/i.test(word)));
+    }
+
     function isTabActivated(el) {
         if (!el) return false;
         const ariaSelected = String(el.getAttribute('aria-selected') || '').toLowerCase();
         const ariaCurrent = String(el.getAttribute('aria-current') || '').toLowerCase();
-        const classes = String(el.className || '');
-        return ariaSelected === 'true'
-            || ariaCurrent === 'true'
-            || /\b(active|selected)\b/i.test(classes);
+        if (ariaSelected === 'true' || ariaCurrent === 'true') return true;
+        if (hasActiveClassToken(el.className)) return true;
+        // A React Tabs komponens az aktív állapotot gyakran a <li> (role="tab" szülő)
+        // elemen jelöli, nem magán a kattintható belső elemen – ezért a szülőt is nézzük.
+        const parent = el.parentElement;
+        return !!(parent && hasActiveClassToken(parent.className));
     }
 
     /** A „Zónákban töltött idő" tab gombjának megnyomása és a tartalom betöltésére várás */
@@ -786,7 +821,16 @@
         while (Date.now() - start < SPLITS_WAIT_MS) {
             // A panel id-je mobilon React useId-vel generált, ezért elsőként a tab gomb
             // aria-controls attribútuma alapján, majd a rögzített id-vel/látható tabpanel-lel keresünk.
-            const pane = getTabPaneFromButton(tabBtn) || findZonesPane() || findVisibleTabPanel();
+            let pane = getTabPaneFromButton(tabBtn) || findZonesPane() || findVisibleTabPanel();
+            if (!pane || !/tartomány|zone/i.test(pane.textContent || '')) {
+                // Ha egyik fenti sem hozott „tartomány" szöveget tartalmazó panelt,
+                // essünk vissza a ténylegesen megjelent tartalom legközelebbi ősére
+                // (a legkisebb – legspecifikusabb – szöveges egyezés alapján).
+                const matches = Array.from(document.querySelectorAll('div, section, article'))
+                    .filter((el) => isVisible(el) && /tartomány/i.test(el.textContent || ''));
+                matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+                if (matches[0]) pane = closestPane(matches[0]);
+            }
             const active = isTabActivated(tabBtn);
             const content = pane ? (pane.textContent || '') : '';
             if (pane && isVisible(pane) && /tartomány|zone/i.test(content)) return pane;
