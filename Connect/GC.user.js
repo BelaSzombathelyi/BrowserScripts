@@ -718,8 +718,70 @@
         return lines;
     }
 
+    function parseDurationSeconds(raw) {
+        const txt = String(raw || '').replace(/\s+/g, '').replace(',', '.');
+        if (!txt) return NaN;
+        const parts = txt.split(':');
+        if (parts.length < 2 || parts.length > 3) return NaN;
+        const secs = Number(parts.pop());
+        const mins = Number(parts.pop());
+        const hours = parts.length ? Number(parts.pop()) : 0;
+        if (![hours, mins, secs].every(Number.isFinite)) return NaN;
+        return (hours * 3600) + (mins * 60) + secs;
+    }
+
+    function formatDuration(rawSeconds) {
+        const total = Math.max(0, Math.round(Number(rawSeconds) || 0));
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = total % 60;
+        if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function parseDistanceKm(raw) {
+        const txt = String(raw || '').replace(',', '.').trim();
+        const m = txt.match(/(\d+(?:\.\d+)?)/);
+        return m ? Number(m[1]) : NaN;
+    }
+
+    function formatPace(secondsPerKm) {
+        if (!Number.isFinite(secondsPerKm) || secondsPerKm <= 0) return '';
+        const total = Math.round(secondsPerKm);
+        const mins = Math.floor(total / 60);
+        const secs = total % 60;
+        return `${mins}:${String(secs).padStart(2, '0')}/km`;
+    }
+
+    function buildRunIntervalSummaryLines(splits) {
+        if (!splits?.headers?.length || !splits?.rows?.length) return [];
+        const headers = splits.headers.map((h) => String(h || '').trim());
+        const typeIdx = headers.findIndex((h) => /^Lépés típusa$/i.test(h));
+        const timeIdx = headers.findIndex((h) => /^Idő$/i.test(h));
+        const distIdx = headers.findIndex((h) => /^Távolság$/i.test(h));
+        if (typeIdx < 0 || timeIdx < 0 || distIdx < 0) return [];
+
+        let runSeconds = 0;
+        let runDistanceKm = 0;
+        for (const row of splits.rows) {
+            const type = String(row[typeIdx] || '');
+            if (!/^Futás$/i.test(type)) continue;
+            const secs = parseDurationSeconds(row[timeIdx]);
+            const km = parseDistanceKm(row[distIdx]);
+            if (Number.isFinite(secs) && secs > 0) runSeconds += secs;
+            if (Number.isFinite(km) && km > 0) runDistanceKm += km;
+        }
+        if (runSeconds <= 0 && runDistanceKm <= 0) return [];
+
+        const lines = [];
+        if (runSeconds > 0) lines.push('Futás idő: ' + formatDuration(runSeconds));
+        if (runDistanceKm > 0) lines.push(`Futás távolság: ${runDistanceKm.toFixed(2)} km`);
+        if (runSeconds > 0 && runDistanceKm > 0) lines.push(`Futás Tempó: ${formatPace(runSeconds / runDistanceKm)}`);
+        return lines;
+    }
+
     /** A StatsBlock szekciók szakaszokra bontva (### cím + „label: value" sorok) */
-    function buildStatsSections(stats) {
+    function buildStatsSections(stats, splits) {
         if (!stats || !stats.length) return '';
         const order = [];
         const map = new Map();
@@ -729,6 +791,16 @@
             const key = section || 'Egyéb';
             if (!map.has(key)) { map.set(key, []); order.push(key); }
             map.get(key).push(`${label}: ${value}`);
+        }
+        const runSummaryLines = buildRunIntervalSummaryLines(splits);
+        if (runSummaryLines.length > 0) {
+            const key = 'Edzésintervallumok';
+            if (!map.has(key)) { map.set(key, []); order.push(key); }
+            const existing = map.get(key);
+            for (const line of runSummaryLines) {
+                const label = line.split(':')[0];
+                if (!existing.some((l) => new RegExp(`^${label}:`, 'i').test(l))) existing.push(line);
+            }
         }
         return order.map((key) => `### ${key}\n\n${map.get(key).join('\n')}`).join('\n\n');
     }
@@ -847,7 +919,7 @@
         }
 
         // ── Részletes statisztikák (StatsBlock szekciók) ────────────────────
-        const statsMd = buildStatsSections(stats);
+        const statsMd = buildStatsSections(stats, splits);
         if (statsMd) sections.push(`## Statisztikák\n\n${statsMd}`);
 
         return sections.join('\n\n') + '\n';
