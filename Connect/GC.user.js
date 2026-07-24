@@ -753,6 +753,14 @@
         return `${mins}:${String(secs).padStart(2, '0')}/km`;
     }
 
+    function isRunningStepType(rawType) {
+        const s = String(rawType || '').trim();
+        if (!s) return false;
+        if (/^Futás\b/i.test(s)) return true;
+        if (/^Run\b/i.test(s)) return true;
+        return false;
+    }
+
     function buildRunIntervalSummaryLines(splits) {
         if (!splits?.headers?.length || !splits?.rows?.length) return [];
         const headers = splits.headers.map((h) => String(h || '').trim());
@@ -765,7 +773,7 @@
         let runDistanceKm = 0;
         for (const row of splits.rows) {
             const type = String(row[typeIdx] || '');
-            if (!/^Futás$/i.test(type)) continue;
+            if (!isRunningStepType(type)) continue;
             const secs = parseDurationSeconds(row[timeIdx]);
             const km = parseDistanceKm(row[distIdx]);
             if (Number.isFinite(secs) && secs > 0) runSeconds += secs;
