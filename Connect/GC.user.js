@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.5.3, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.5.4, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.5.3
+// @version      3.5.4
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.5.3';
+    const VERSION       = '3.5.4';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -31,7 +31,7 @@
     // (időbélyeg, kontextus, akár rész-DOM HTML) gyűjtünk, és ezt a generált
     // MD fájl végéhez fűzzük egy „Debug napló" szekcióban, hogy könnyebb
     // legyen a hibák utólagos javítása.
-    const DEBUG = true;
+    const DEBUG = false;
 
     function log(...args)  { console.log('[GC V3]', ...args); }
     function sleep(ms)     { return new Promise((r) => setTimeout(r, ms)); }
