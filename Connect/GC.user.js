@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.5.1, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.5.2, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.5.1
+// @version      3.5.2
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.5.1';
+    const VERSION       = '3.5.2';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -822,6 +822,11 @@
     function findZonesPane() {
         return document.querySelector('#tab-time-in-zones')
             || document.querySelector('[id*="time-in-zones"]')
+            // A valódi React-komponens konténere (pl. „Tabs_timeInZonesTabContent__h3mfr")
+            // – ez fogja körbe az összes tartomány-diagramot (pulzus/teljesítmény/tempó) a
+            // hozzájuk tartozó címsorral együtt, szemben az egyes TimeInZonesChart_barRoot
+            // sorokkal, amik önmagukban cím nélküliek (lásd widenPaneUntil az openZonesTab-ban).
+            || document.querySelector('[class*="timeInZonesTabContent" i]')
             || null;
     }
 
@@ -879,7 +884,22 @@
                 const matches = Array.from(document.querySelectorAll('div, section, article'))
                     .filter((el) => isVisible(el) && /tartomány/i.test(visibleTextOf(el)));
                 matches.sort((a, b) => visibleTextOf(a).length - visibleTextOf(b).length);
-                if (matches[0]) pane = closestPane(matches[0]);
+                if (matches[0]) {
+                    pane = closestPane(matches[0]);
+                    // A legkisebb egyezés jellemzően egyetlen tartomány-sor (pl.
+                    // TimeInZonesChart_barRoot) – ennek sem a `closest()` panel-őse,
+                    // sem önmaga nem tartalmazza a szekció címét (pl. „Pulzus-
+                    // tartományok"), amely nélkül a scrapeZones() nem tud szekciót
+                    // képezni a sorokból. Lépegessünk feljebb, amíg a widenPaneUntil
+                    // meg nem találja a (többes számú) „…tartományok" címsort tartalmazó
+                    // közös ősét, vagy a React-komponens valódi konténerét.
+                    pane = widenPaneUntil(
+                        pane,
+                        (node) => /tartományok/i.test(visibleTextOf(node))
+                            || /timeInZonesTabContent/i.test(String(node.className || '')),
+                        8,
+                    );
+                }
             }
             const active = isTabActivated(tabBtn);
             const content = pane ? visibleTextOf(pane) : '';
