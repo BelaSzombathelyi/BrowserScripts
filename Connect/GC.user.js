@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.0.7, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.0.8, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.0.7
-// @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
+// @version      3.0.8
+// @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
 // @grant        none
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.0.7';
+    const VERSION       = '3.0.8';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -418,13 +418,31 @@
         };
 
         const firstCell = (row) => row.querySelector('td') || row.querySelector('[class*="tableRowItem"]');
-        const caretOf = (row) => { const c = firstCell(row); return c ? c.querySelector('svg') : null; };
+        // A caret-jelölő ikon osztálynevei deploy-onként változhatnak (svg, chevron-, caret-,
+        // expand- ikon, vagy aria-expanded attribútum) – minél többfélét próbálunk felismerni.
+        const caretSel = 'svg, [aria-expanded], [class*="caret" i], [class*="Caret"], '
+                       + '[class*="chevron" i], [class*="Chevron"], [class*="expand" i], [class*="Expand"]';
+        const caretOf = (row) => {
+            const c = firstCell(row);
+            if (c) {
+                const found = c.querySelector(caretSel);
+                if (found) return found;
+            }
+            if (row.hasAttribute && row.hasAttribute('aria-expanded')) return row;
+            return null;
+        };
         const hasCaret = (row) => !!caretOf(row);
+        const rowIsMarkedExpanded = (row) => {
+            if (row.getAttribute && row.getAttribute('aria-expanded') === 'true') return true;
+            const c = caretOf(row);
+            return !!(c && c.getAttribute && c.getAttribute('aria-expanded') === 'true');
+        };
         const isExpanded = (row) => {
+            if (rowIsMarkedExpanded(row)) return true;
             const n = row.nextElementSibling;
             if (!n || !n.matches || !n.matches(rowSel)) return false;
             const c = firstCell(n);
-            return !!(c && !c.querySelector('svg'));
+            return !!(c && !c.querySelector(caretSel));
         };
 
         let total = 0;
@@ -470,7 +488,18 @@
                 total++;
                 target.dataset.gcv2done = '1';
             } else {
-                // Nem történt változás – jelöljük, hogy már nem próbáljuk
+                // A caret kattintása nem hozott változást – próbáljuk a teljes sort is
+                // (néhány deploy-ban a click handler a <tr>-en van, nem a caret ikonon)
+                dispatchClick(target);
+                await sleep(EXPAND_PASS_MS);
+                const afterRow = allRows().length;
+                if (afterRow > before) {
+                    total++;
+                } else if (afterRow < before) {
+                    dispatchClick(target);
+                    await sleep(EXPAND_PASS_MS);
+                    total++;
+                }
                 target.dataset.gcv2done = '1';
             }
         }
@@ -581,6 +610,89 @@
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // Zónákban töltött idő tab – megnyitás + scrape
+    // ────────────────────────────────────────────────────────────────────────
+
+    /** A „Zónákban töltött idő" tab gombjának megnyomása és a tartalom betöltésére várás */
+    async function openZonesTab(setStatus) {
+        const tabBtn = document.querySelector('#tabTimeInZonesId');
+        if (!tabBtn) {
+            setStatus('ℹ️ „Zónákban töltött idő" tab nem elérhető ezen az aktivitáson');
+            return null;
+        }
+        setStatus('⏳ „Zónákban töltött idő" tab megnyitása…');
+        dispatchClick(tabBtn);
+
+        let pane = null;
+        try {
+            pane = await waitForElement('#tab-time-in-zones', SPLITS_WAIT_MS);
+        } catch {
+            setStatus('⚠️ A „Zónákban töltött idő" panel nem jelent meg');
+            return null;
+        }
+        const start = Date.now();
+        while (Date.now() - start < SPLITS_WAIT_MS) {
+            if (/tartomány/i.test(pane.textContent || '')) break;
+            await sleep(200);
+        }
+        return pane;
+    }
+
+    /**
+     * A „Zónákban töltött idő" panel scrape-elése. Az ikon-alapú/CSS-modules
+     * osztálynevek deploy-onként változhatnak, ezért a renderelt (layout szerinti)
+     * szöveget (innerText) soronként elemezzük – ez robusztusabb, mint fix
+     * class-szelektorokra hagyatkozni.
+     * Formátum soronként (Garmin Connect):
+     *   „<Szekció neve>-tartományok"
+     *   „Tartomány 5 > 156 üt/p • Maximális"
+     *   „2:51 5%"
+     * @returns {{title: string, rows: string[][]}[]}
+     */
+    function scrapeZones(pane) {
+        const raw = pane.innerText || pane.textContent || '';
+        const lines = raw.split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+
+        const sectionRe = /tartományok$/i;
+        const zoneLineRe = /^Tartomány\s+(\d+)\s+(.+?)(?:\s+(\d{1,3}:\d{2}(?::\d{2})?)\s+(\d{1,3})\s*%)?$/i;
+        const timePctRe = /^(\d{1,3}:\d{2}(?::\d{2})?)\s+(\d{1,3})\s*%$/;
+
+        const sections = [];
+        let current = null;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (sectionRe.test(line) && !/^Tartomány\s+\d/i.test(line)) {
+                current = { title: line, rows: [] };
+                sections.push(current);
+                continue;
+            }
+            const m = line.match(zoneLineRe);
+            if (m && current) {
+                const desc = m[2].trim();
+                let time = m[3] || '';
+                let pct  = m[4] ? `${m[4]}%` : '';
+                if (!time) {
+                    const next = lines[i + 1] || '';
+                    const tp = next.match(timePctRe);
+                    if (tp) { time = tp[1]; pct = `${tp[2]}%`; i++; }
+                }
+                current.rows.push([m[1], desc, time, pct]);
+            }
+        }
+
+        return sections.filter((s) => s.rows.length > 0);
+    }
+
+    /** Teljes Zónákban töltött idő folyamat: tab → scrape */
+    async function collectZones(setStatus) {
+        const pane = await openZonesTab(setStatus);
+        if (!pane) return null;
+        setStatus('⏳ Zónákban töltött idő beolvasása…');
+        return scrapeZones(pane);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // Markdown összeállítás
     // ────────────────────────────────────────────────────────────────────────
 
@@ -681,7 +793,7 @@
         };
     }
 
-    function buildMarkdown({ activityId, splits, stats, domName, domMeta, domNotes, domComments, headerStats }) {
+    function buildMarkdown({ activityId, splits, zones, stats, domName, domMeta, domNotes, domComments, headerStats }) {
         const sections = [];
 
         // ── Fejléc ──────────────────────────────────────────────────────────
@@ -724,6 +836,14 @@
             } else {
                 sections.push(`## Körök\n\n${mdTable(splits.headers, splits.rows)}`);
             }
+        }
+
+        // ── Zónákban töltött idő (Pulzusszám-/Teljesítmény-/Tempó-tartományok) ──
+        if (zones && zones.length > 0) {
+            const zoneParts = zones.map(
+                (z) => `### ${z.title}\n\n${mdTable(['Tartomány', 'Leírás', 'Idő', 'Arány'], z.rows)}`
+            );
+            sections.push(`## Zónákban töltött idő\n\n${zoneParts.join('\n\n')}`);
         }
 
         // ── Részletes statisztikák (StatsBlock szekciók) ────────────────────
@@ -876,10 +996,13 @@
             // 2. Időközök tab → „Összes" → összes kör kibontása → scrape
             const splits = await collectSplits(setStatus);
 
+            // 2b. Zónákban töltött idő tab → scrape
+            const zones = await collectZones(setStatus);
+
             // 3. Markdown
             setStatus('⏳ Markdown generálása…');
             const md = buildMarkdown({
-                activityId, splits, stats,
+                activityId, splits, zones, stats,
                 domName, domMeta, domNotes, domComments, headerStats,
             });
 
