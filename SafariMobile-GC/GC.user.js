@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.5.4, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.5.5, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.5.4
+// @version      3.5.5
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.5.4';
+    const VERSION       = '3.5.5';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -476,9 +476,9 @@
      *  keresünk, és csak ha az nem talál semmit, esünk vissza a régi id-re. */
     function findSplitsTabButton() {
         const candidates = Array.from(document.querySelectorAll('[role="tab"]'));
-        const byText = candidates.find((el) => isVisible(el) && /időközök|splits/i.test(textOf(el)));
+        const byText = candidates.find((el) => isVisible(el) && /időközök|körök|splits|laps/i.test(textOf(el)));
         if (byText) return byText;
-        return document.querySelector('#tabSplitsId');
+        return document.querySelector('#tabSplitsId')?.closest('[role="tab"]') || document.querySelector('#tabSplitsId');
     }
 
     /** Az „Időközök" tab gombjának megnyomása és a tartalom betöltésére várás */
@@ -505,9 +505,9 @@
             // párja és nincs role="tabpanel" sem), essünk vissza a ténylegesen
             // megjelent tartalom (kör-sorok) legközelebbi „panel" ősére.
             if (!pane) {
-                const contentEl = document.querySelector(
-                    '[class*="IntervalsTable_tableRow"], [class*="ListTable_tableRow"]',
-                );
+                const contentEl = Array.from(document.querySelectorAll(
+                    '[class*="IntervalsTable_tableRow"], [class*="ListTable_tableRow"], [class*="SortableTable_tableRow"], [class*="tableRow" i]'
+                )).find(isVisible);
                 if (contentEl) {
                     pane = closestPane(contentEl);
                     // A closestPane által talált ős még nem biztos, hogy tartalmazza a
@@ -525,6 +525,8 @@
             const hasRows = pane && (
                 pane.querySelector('[class*="IntervalsTable_tableRow"]')
                 || pane.querySelector('[class*="ListTable_tableRow"]')
+                || pane.querySelector('[class*="SortableTable_tableRow"]')
+                || pane.querySelector('[class*="tableRow" i]')
                 || pane.querySelector('table tbody tr')
             );
             if (pane && isVisible(pane) && (active || hasRows)) break;
@@ -536,16 +538,20 @@
             dlog('openSplitsTab: panel nem jelent meg', '', tabBtn);
             return null;
         }
-        // Várjuk meg, hogy legyen tartalom (IntervalsTable / ListTable sor vagy table)
+        // Várjuk meg, hogy legyen tartalom (IntervalsTable / ListTable / SortableTable sor vagy table)
         const rowStart = Date.now();
         while (Date.now() - rowStart < SPLITS_WAIT_MS) {
             if (pane.querySelector('[class*="IntervalsTable_tableRow"]')
              || pane.querySelector('[class*="ListTable_tableRow"]')
+             || pane.querySelector('[class*="SortableTable_tableRow"]')
+             || pane.querySelector('[class*="tableRow" i]')
              || pane.querySelector('table tbody tr')) break;
             await sleep(200);
         }
         if (!pane.querySelector('[class*="IntervalsTable_tableRow"]')
          && !pane.querySelector('[class*="ListTable_tableRow"]')
+         && !pane.querySelector('[class*="SortableTable_tableRow"]')
+         && !pane.querySelector('[class*="tableRow" i]')
          && !pane.querySelector('table tbody tr')) {
             dlog('openSplitsTab: időtúllépés, nincs sor a panelben', '', pane);
         }
@@ -598,14 +604,14 @@
             dlog('expandAllRows: nincs tábla', '', pane);
             return 0;
         }
-        const rowSel = '[class*="IntervalsTable_tableRow"]';
+        const rowSel = '[class*="IntervalsTable_tableRow"], [class*="SortableTable_tableRow"], [class*="ListTable_tableRow"], [class*="tableRow" i], tr';
 
         const allRows = () => {
             const inBody = Array.from(table.querySelectorAll(`tbody ${rowSel}`));
             if (inBody.length) return inBody;
             const generic = Array.from(table.querySelectorAll(rowSel));
-            if (generic.length) return generic;
-            return Array.from(table.querySelectorAll('tbody tr'));
+            if (generic.length) return generic.filter((r) => !r.querySelector('th'));
+            return Array.from(table.querySelectorAll('tbody tr')).filter((r) => !r.querySelector('th'));
         };
 
         const firstCell = (row) => row.querySelector('td') || row.querySelector('[class*="tableRowItem"]');
@@ -999,6 +1005,91 @@
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // Emelkedők tab – megnyitás + scrape
+    // ────────────────────────────────────────────────────────────────────────
+
+    /** A „Emelkedők" tab gombja. */
+    function findClimbsTabButton() {
+        const candidates = Array.from(document.querySelectorAll('[role="tab"]'));
+        const byText = candidates.find((el) => isVisible(el) && /emelkedők|climbs/i.test(textOf(el)));
+        if (byText) return byText;
+        return null;
+    }
+
+    function findClimbsPane() {
+        return document.querySelector('[class*="ActivityClimbTab_tableContainer"]')
+            || document.querySelector('[class*="ActivityClimbTab_"]')
+            || null;
+    }
+
+    /** A „Emelkedők" tab gombjának megnyomása és a tartalom betöltésére várás */
+    async function openClimbsTab(setStatus) {
+        const tabBtn = findClimbsTabButton();
+        if (!tabBtn) {
+            log('openClimbsTab: nincs emelkedők tab gomb ezen az aktivitáson');
+            return null;
+        }
+        setStatus('⏳ „Emelkedők" tab megnyitása…');
+        dispatchClick(tabBtn);
+
+        const start = Date.now();
+        let pane = null;
+        while (Date.now() - start < SPLITS_WAIT_MS) {
+            pane = getTabPaneFromButton(tabBtn) || findClimbsPane() || findVisibleTabPanel();
+            
+            const active = isTabActivated(tabBtn);
+            const hasTable = pane && (
+                pane.querySelector('table') || pane.querySelector('[class*="table"]')
+            );
+            if (pane && isVisible(pane) && (active || hasTable)) break;
+            if (!active) { dispatchClick(tabBtn); dispatchActivateKeys(tabBtn); }
+            await sleep(200);
+        }
+        if (!pane || !isVisible(pane)) {
+            setStatus('⚠️ Az „Emelkedők" panel nem jelent meg');
+            dlog('openClimbsTab: panel nem jelent meg', '', tabBtn);
+            return null;
+        }
+        // Várjuk meg, hogy legyen tartalom (table)
+        const rowStart = Date.now();
+        while (Date.now() - rowStart < SPLITS_WAIT_MS) {
+            if (pane.querySelector('table') || pane.querySelector('[class*="table"]')) break;
+            await sleep(200);
+        }
+        return pane;
+    }
+
+    /** A „Emelkedők" panel scrape-elése. */
+    function scrapeClimbsTable(pane) {
+        const table = pane.querySelector('table');
+        if (!table) {
+            dlog('scrapeClimbsTable: nem található table az Emelkedők panelben', '', pane);
+            return null;
+        }
+        const headers = Array.from(table.querySelectorAll('thead th')).map((th) => textOf(th));
+        const rows = [];
+        for (const tr of table.querySelectorAll('tbody tr, tfoot tr')) {
+            const cls = String(tr.className || '');
+            if (/_hidden__/.test(cls)) continue;
+            if (!isVisible(tr)) continue;
+            const cells = Array.from(tr.querySelectorAll('td')).map((td) => textOf(td));
+            if (cells.some((c) => c !== '')) rows.push(cells);
+        }
+        if (rows.length > 0) return dropEmptyColumns(headers, rows);
+        return null;
+    }
+
+    /** Teljes Emelkedők folyamat: tab → scrape */
+    async function collectClimbs(setStatus) {
+        const pane = await openClimbsTab(setStatus);
+        if (!pane) return null;
+        setStatus('⏳ Emelkedők tábla beolvasása…');
+        const climbs = scrapeClimbsTable(pane);
+        if (!climbs || climbs.rows.length === 0) dlog('scrapeClimbsTable: nem sikerült az emelkedők táblát beolvasni', '', pane);
+        return climbs;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // Markdown összeállítás
     // ────────────────────────────────────────────────────────────────────────
 
@@ -1137,8 +1228,8 @@
     function splitLapsTable(splits) {
         if (!splits || !splits.rows || !splits.rows.length) return null;
         const { headers, rows } = splits;
-        let korIdx = headers.findIndex((h) => /^Kör$/i.test(String(h || '').trim()));
-        if (korIdx < 0) korIdx = 2; // a „Kör" oszlop tipikus pozíciója
+        let korIdx = headers.findIndex((h) => /^Kör(ök)?|Lap(s)?$/i.test(String(h || '').trim()));
+        if (korIdx < 0) korIdx = 0; // a „Körök" / „Kör" / „Laps" / „Lap" oszlop általában az 1. oszlop (index 0)
 
         const rangeRe  = /^(\d+)\s*[-–—]\s*(\d+)$/;
         const singleRe = /^(\d+)$/;
@@ -1179,7 +1270,7 @@
         };
     }
 
-    function buildMarkdown({ activityId, splits, zones, stats, domName, domMeta, domNotes, domComments, headerStats }) {
+    function buildMarkdown({ activityId, splits, zones, climbs, stats, domName, domMeta, domNotes, domComments, headerStats }) {
         const sections = [];
 
         // ── Fejléc ──────────────────────────────────────────────────────────
@@ -1222,6 +1313,11 @@
             } else {
                 sections.push(`## Körök\n\n${mdTable(splits.headers, splits.rows)}`);
             }
+        }
+
+        // ── Emelkedők (terepfutás esetén) ──────────────────────────────────
+        if (climbs && climbs.rows.length > 0) {
+            sections.push(`## Emelkedők\n\n${mdTable(climbs.headers, climbs.rows)}`);
         }
 
         // ── Zónákban töltött idő (Pulzusszám-/Teljesítmény-/Tempó-tartományok) ──
@@ -1403,13 +1499,16 @@
             // 2. Időközök tab → „Összes" → összes kör kibontása → scrape
             const splits = await collectSplits(setStatus);
 
-            // 2b. Zónákban töltött idő tab → scrape
+            // 2b. Emelkedők tab → scrape (ha van)
+            const climbs = await collectClimbs(setStatus);
+
+            // 2c. Zónákban töltött idő tab → scrape
             const zones = await collectZones(setStatus);
 
             // 3. Markdown
             setStatus('⏳ Markdown generálása…');
             const md = buildMarkdown({
-                activityId, splits, zones, stats,
+                activityId, splits, zones, climbs, stats,
                 domName, domMeta, domNotes, domComments, headerStats,
             });
 
@@ -1430,7 +1529,7 @@
             // hogy a hibakereséshez legyen mihez nyúlni.
             if (DEBUG && debugEntries.length > 0) {
                 const debugMd = buildMarkdown({
-                    activityId: getActivityId(), splits: null, zones: null, stats: [],
+                    activityId: getActivityId(), splits: null, zones: null, climbs: null, stats: [],
                     domName: '', domMeta: {}, domNotes: '', domComments: [], headerStats: [],
                 });
                 downloadOrOpenMd(`debug_${getActivityId() || 'hiba'}.md`, debugMd);

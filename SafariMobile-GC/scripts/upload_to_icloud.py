@@ -88,6 +88,84 @@ def authenticate(apple_id: str, password: str, session_dir: Path) -> Any:
     return api
 
 
+def get_apple_password(apple_id: str) -> tuple[str, bool]:
+    """Retrieves the Apple ID password from env, local keyring, or interactive prompt.
+
+    Returns:
+        tuple[str, bool]: A tuple containing the password and a boolean indicating
+                           whether the password was retrieved from the local keyring.
+    """
+    password = os.environ.get("ICLOUD_PASSWORD")
+    if password:
+        return password, False
+
+    try:
+        import keyring
+        password = keyring.get_password("icloudpy", apple_id)
+        if password:
+            print("Jelszó sikeresen betöltve a helyi Credential Managerből.")
+            return password, True
+    except Exception:
+        pass
+
+    password = getpass.getpass("Apple ID-jelszó: ")
+    if not password:
+        raise SystemExit("A jelszó megadása kötelező.")
+
+    return password, False
+
+
+def save_apple_password(apple_id: str, password: str) -> None:
+    """Saves the Apple ID password in the local keyring database."""
+    if os.environ.get("ICLOUD_PASSWORD"):
+        return
+    try:
+        import keyring
+        keyring.set_password("icloudpy", apple_id, password)
+        print("Jelszó biztonságosan elmentve a helyi Credential Managerbe.")
+    except Exception as e:
+        print(f"Nem sikerült menteni a jelszót a Credential Managerbe: {e}")
+
+
+def get_apple_id() -> tuple[str, bool]:
+    """Retrieves the Apple ID from env, local keyring, or interactive prompt.
+
+    Returns:
+        tuple[str, bool]: A tuple containing the Apple ID email and a boolean indicating
+                           whether it was retrieved from the local keyring.
+    """
+    apple_id = os.environ.get("ICLOUD_APPLE_ID")
+    if apple_id:
+        return apple_id, False
+
+    try:
+        import keyring
+        apple_id = keyring.get_password("icloudpy_config", "last_apple_id")
+        if apple_id:
+            print(f"Apple ID betöltve a helyi Credential Managerből: {apple_id}")
+            return apple_id, True
+    except Exception:
+        pass
+
+    apple_id = input("Apple ID e-mail: ").strip()
+    if not apple_id:
+        raise SystemExit("Apple ID szükséges.")
+
+    return apple_id, False
+
+
+def save_apple_id(apple_id: str) -> None:
+    """Saves the Apple ID in the local keyring database."""
+    if os.environ.get("ICLOUD_APPLE_ID"):
+        return
+    try:
+        import keyring
+        keyring.set_password("icloudpy_config", "last_apple_id", apple_id)
+        print("Apple ID biztonságosan elmentve a helyi Credential Managerbe.")
+    except Exception as e:
+        print(f"Nem sikerült menteni az Apple ID-t a Credential Managerbe: {e}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Helyi fájl feltöltése iCloud Drive-ba.")
     parser.add_argument("source", type=Path, help="A feltöltendő helyi fájl")
@@ -107,12 +185,17 @@ def main() -> None:
     if not source.is_file():
         raise SystemExit(f"A forrásfájl nem található: {source}")
 
-    apple_id = os.environ.get("ICLOUD_APPLE_ID") or input("Apple ID e-mail: ").strip()
-    password = os.environ.get("ICLOUD_PASSWORD") or getpass.getpass("Apple ID-jelszó: ")
-    if not apple_id or not password:
-        raise SystemExit("Apple ID és jelszó szükséges.")
+    apple_id, id_from_keyring = get_apple_id()
+
+    password, password_from_keyring = get_apple_password(apple_id)
 
     api = authenticate(apple_id, password, args.session_dir.expanduser())
+    
+    if not id_from_keyring:
+        save_apple_id(apple_id)
+
+    if not password_from_keyring:
+        save_apple_password(apple_id, password)
     target_folder = get_or_create_folder(api.drive, args.destination)
     with source.open("rb") as file_in:
         target_folder.upload(file_in)

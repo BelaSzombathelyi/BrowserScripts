@@ -1,0 +1,117 @@
+# Edzés: (UTC+02:00) Közép-európai időMa @ 6:04 de | 54:34 | Bp - Céges előtt vagy után 10km
+
+Aktivitás ID: 12345678
+Időpont: (UTC+02:00) Közép-európai időMa @ 6:04 de
+Távolság: 10.09 km
+Idő: 54:34
+Átlagos tempó: 5:25 /km
+Teljes emelkedés: 36 m
+Kalóriaszám: 697 kcal
+Aktív kalória: 618 kcal
+
+## Edzésintervallumok
+
+| Tevékenységek | Pihenés | Aktív | Összes |
+| --- | --- | --- | --- |
+| Futás | 110 | 300 | 410 |
+| Gyaloglás | 50 | 150 | 200 |
+| Napi lépések száma | 50 | 150 | 200 |
+| Mindösszesen | 210 | 600 | 810 |
+
+## Körök
+
+Nem feltétlenül egyenletes km-ek: terepfutásnál a felhasználó nagyon gyakran a tempóváltásoknál is új kört indít.
+
+| Tevékenységek | Pihenés | Aktív | Összes |
+| --- | --- | --- | --- |
+| Futás | 110 | 300 | 410 |
+| Gyaloglás | 50 | 150 | 200 |
+| Napi lépések száma | 50 | 150 | 200 |
+| Mindösszesen | 210 | 600 | 810 |
+
+## Statisztikák
+
+### Légzésszám
+
+Átl. légzésszám: 38 brpm
+Min. légzésszám: 20 brpm
+Max. légzésszám: 44 brpm
+
+### Stamina
+
+Potenciál kezdéskor: 98%
+Potenciál befejezéskor: 83%
+Min. állóképesség: 83%
+
+### Edzési hatás
+
+Elsődleges előny: Alap (Alacsony aerob)
+Aerob: 3.0 Nagy hatás
+Anaerob: 0.0 Nincs javulás
+Testterhelés: 82
+
+### Pulzusszám
+
+Átlagos pulzusszám: 128 üt/p
+Max. pulzus: 138 üt/p
+
+### Időzítés
+
+Idő: 54:34
+Menetidő: 54:30
+Eltelt idő: 56:39
+
+### Teljesítmény
+
+Átl. teljesítmény: 375 W
+Max. teljesítmény: 561 W
+Széladatok: Bekapcsolva
+
+### Magasság
+
+Teljes emelkedés: 36 m
+Teljes süllyedés: 38 m
+Min magass.: 102 m
+Max magass.: 117 m
+
+### Futás/séta
+
+Futási idő: 54:33
+Sétálási idő: 0:00.5
+Tétlenül töltött idő: 0:00.2
+
+### Tempó/sebesség
+
+Átlagos tempó: 5:25 /km
+Átlagos mozgási tempó: 5:24 /km
+Legjobb tempó: 4:12 /km
+Átl. nehézséghez igazított tempó: 5:25 /km
+
+### Futási dinamika
+
+Átl. pedálütem: 169 lépés/perc
+Max. pedálütem: 173 lépés/perc
+Átlagos lépéshossz: 1.10 m
+Átlagos függőleges arány: 9.9 %
+Átlagos függőleges oszcilláció: 11.1 cm
+Átlagos GCT egyensúly: 50.1% B / 49.9% J
+Átlagos talajérintési idő: 249 ms
+
+### Hőmérséklet
+
+Átlagos hőmérséklet: 21.0 °C
+Minimális hőmérséklet: 18.0 °C
+Maximális hőmérséklet: 31.0 °C
+
+### Intenzív percek
+
+Mérsékelt: 1 perc
+Élénk: 55 percx2
+Összes: 111 perc
+
+### Body Battery
+
+Nettó hatás: -14
+
+---
+_Generálva: GC→MD v3.5.5_

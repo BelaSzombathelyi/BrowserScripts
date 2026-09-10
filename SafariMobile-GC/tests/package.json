@@ -1,0 +1,12 @@
+{
+  "name": "gc-snapshots-tests",
+  "version": "1.0.0",
+  "description": "Snapshots testing for GC.user.js using JSDOM",
+  "main": "run_snapshots.js",
+  "dependencies": {
+    "jsdom": "^26.0.0"
+  },
+  "scripts": {
+    "test": "node run_snapshots.js"
+  }
+}
