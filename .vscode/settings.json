@@ -9,5 +9,6 @@
     },
     "hide-files.files": [
         "LICENSE"
-    ]
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }

@@ -1,0 +1,3 @@
+[submodule "SafariMobile-GC/vendor/icloudpy"]
+	path = SafariMobile-GC/vendor/icloudpy
+	url = https://github.com/mandarons/icloudpy.git
