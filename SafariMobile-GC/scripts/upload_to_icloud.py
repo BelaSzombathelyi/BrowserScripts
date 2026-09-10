@@ -23,10 +23,13 @@ if VENDORED_ICLOUDPY.is_dir():
     sys.path.insert(0, str(VENDORED_ICLOUDPY))
 
 try:
-    from icloudpy import PyiCloudService
+    try:
+        from icloudpy import ICloudPyService as PyiCloudService
+    except ImportError:
+        from icloudpy import PyiCloudService
 except ImportError as error:
     raise SystemExit(
-        "Az icloudpy nincs telepítve. Először futtasd: "
+        "Az icloudpy nincs telepítve vagy nem megfelelő. Először futtasd: "
         "py -m pip install -r vendor/icloudpy/requirements.txt"
     ) from error
 
@@ -52,6 +55,22 @@ def authenticate(apple_id: str, password: str, session_dir: Path) -> Any:
     )
 
     if api.requires_2fa:
+        # Apple's current auth flow requires an explicit trusted-device request
+        # before it will push a code. Merely detecting the 2FA requirement is
+        # not enough to make an iPhone notification appear.
+        try:
+            notification_sent = api.trigger_2fa_push_notification()
+        except AttributeError as error:
+            raise RuntimeError(
+                "Az icloudpy ezen verziója nem tud 2FA-push értesítést kérni. "
+                "Frissítsd a vendor/icloudpy submodule-t a legújabb verzióra."
+            ) from error
+        if not notification_sent:
+            raise RuntimeError(
+                "Az Apple nem fogadta el a 2FA-push értesítés kérését. "
+                "Ellenőrizd az internetkapcsolatot, majd indítsd újra a scriptet."
+            )
+        print("Apple 2FA-értesítés elküldve a megbízható eszközökre.")
         code = input("Írd be az Apple által küldött 2FA-kódot: ").strip()
         if not api.validate_2fa_code(code):
             raise RuntimeError("Érvénytelen vagy elutasított 2FA-kód.")
