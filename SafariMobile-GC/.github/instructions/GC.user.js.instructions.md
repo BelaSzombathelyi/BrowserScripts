@@ -1,5 +1,5 @@
 ---
-description: "Use when editing or updating the GC.user.js grease monkey script file to enforce version bumps and trigger the iCloud upload skill."
+description: "Use when editing or updating the GC.user.js grease monkey script file to automatically bump version using the bump-version skill, trigger the iCloud upload skill, and send notifications."
 applyTo: "GC.user.js"
 ---
 
@@ -15,8 +15,12 @@ Ez a script iOS Safari böngészőhöz kell, hogy fusson.
 ## Kötelező lépések minden módosítás után:
 
 1. **Verzió emelése (Version Bump)**:
-   - A [GC.user.js](GC.user.js) metaadat fejlécében (UserScript header) található `@version` értékét mindig növelni kell (pl. `1.0.4` -> `1.0.5` vagy `1.1.0`).
-   - Ezt még a változtatások mentése előtt/közben végezd el.
+   - A [GC.user.js](GC.user.js) fájlban található verzió emeléséhez használd a **`bump-version`** skillt.
+   - Ehhez futtasd le a következő parancsot a terminálban:
+     ```powershell
+     py .github/skills/bump-version/bump_version.py
+     ```
+   - Alapértelmezetten ez egy patch verzióemelést hajt végre (pl. `3.5.6` -> `3.5.7`). Szükség esetén használhatsz `--type minor` vagy `--type major` paramétert, illetve a `--set-version X.Y.Z` kapcsolóval konkrét verziót is megadhatsz.
 
 2. **Automata iCloud feltöltés**:
    - Minden sikeres módosítás és verzióemelés után meg kell hívni az **`upload-for-icloud`** skillt az iCloud tárhelyre történő automatikus szinkronizációhoz.
