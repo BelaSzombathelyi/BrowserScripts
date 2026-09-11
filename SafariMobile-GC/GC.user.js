@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Garmin Connect → Markdown (v3.5.5, szerver nélkül)
+// @name         Garmin Connect → Markdown (v3.5.6, szerver nélkül)
 // @namespace    https://connect.garmin.com/
-// @version      3.5.5
+// @version      3.5.6
 // @description  Garmin Connect activity detail oldal tetejére tesz egy overlay-t: egy kattintással Markdown fájlt tölt le (helyi szerver, FIT letöltés és Garmin API NÉLKÜL – kizárólag az oldal HTML-jéből bányászva). Megnyitja az „Időközök" tabot, „Összes" szűrőre vált, az összes lenyitható kört (caret) kibontja, és minden oszlopot beletesz az MD-be. Emellett megnyitja a „Zónákban töltött idő" tabot és a pulzus-/teljesítmény-/tempó-tartomány táblázatokat is beleteszi az MD-be. iOS Safari / Userscripts plugin-kompatibilis letöltés.
 // @author       Szombathelyi Béla
 // @match        https://connect.garmin.com/app/activity/*
@@ -16,7 +16,7 @@
     // Konstansok
     // ────────────────────────────────────────────────────────────────────────
 
-    const VERSION       = '3.5.5';
+    const VERSION       = '3.5.6';
     const OVERLAY_ID    = 'gc-v3-overlay';
     const STATUS_ID     = 'gc-v3-status';
     const BTN_ID        = 'gc-v3-btn';
@@ -33,7 +33,7 @@
     // legyen a hibák utólagos javítása.
     const DEBUG = false;
 
-    function log(...args)  { console.log('[GC V3]', ...args); }
+    function log(...args)  { console.log('[UserScript]', ...args); }
     function sleep(ms)     { return new Promise((r) => setTimeout(r, ms)); }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1306,7 +1306,7 @@
                 if (split.intervals.rows.length > 0) {
                     sections.push(`## Edzésintervallumok\n\n${mdTable(split.intervals.headers, split.intervals.rows)}`);
                 }
-                if (split.laps.rows.length > 0) {
+                if (split.laps.rows.length > 0 && !(split.intervals && split.intervals.rows.length > 0)) {
                     const lapsNote = 'Nem feltétlenül egyenletes km-ek: terepfutásnál a felhasználó nagyon gyakran a tempóváltásoknál is új kört indít.';
                     sections.push(`## Körök\n\n${lapsNote}\n\n${mdTable(split.laps.headers, split.laps.rows)}`);
                 }

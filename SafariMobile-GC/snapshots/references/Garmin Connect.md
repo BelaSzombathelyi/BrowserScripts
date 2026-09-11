@@ -18,17 +18,6 @@ Aktív kalória: 618 kcal
 | Napi lépések száma | 50 | 150 | 200 |
 | Mindösszesen | 210 | 600 | 810 |
 
-## Körök
-
-Nem feltétlenül egyenletes km-ek: terepfutásnál a felhasználó nagyon gyakran a tempóváltásoknál is új kört indít.
-
-| Tevékenységek | Pihenés | Aktív | Összes |
-| --- | --- | --- | --- |
-| Futás | 110 | 300 | 410 |
-| Gyaloglás | 50 | 150 | 200 |
-| Napi lépések száma | 50 | 150 | 200 |
-| Mindösszesen | 210 | 600 | 810 |
-
 ## Statisztikák
 
 ### Légzésszám
@@ -114,4 +103,4 @@ Mérsékelt: 1 perc
 Nettó hatás: -14
 
 ---
-_Generálva: GC→MD v3.5.5_
+_Generálva: GC→MD v3.5.6_
