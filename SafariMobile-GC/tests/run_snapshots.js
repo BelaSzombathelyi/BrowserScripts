@@ -13,8 +13,12 @@ if (!fs.existsSync(SNAPSHOTS_DIR)) {
     fs.mkdirSync(SNAPSHOTS_DIR, { recursive: true });
 }
 
-// Read the userscript code
-const userScriptCode = fs.readFileSync(USER_SCRIPT_PATH, 'utf8');
+// Read the userscript code and adjust timing constants for fast execution in JSDOM tests
+let userScriptCode = fs.readFileSync(USER_SCRIPT_PATH, 'utf8');
+userScriptCode = userScriptCode
+    .replace('const SPLITS_WAIT_MS  = 12000;', 'const SPLITS_WAIT_MS  = 2000;')
+    .replace('const EXPAND_PASS_MS  = 180;', 'const EXPAND_PASS_MS  = 5;')
+    .replace('const MAX_WAIT = 30010;', 'const MAX_WAIT = 2000;');
 
 // List of HTML reference files to test
 const htmlFiles = fs.readdirSync(REFERENCES_DIR)
@@ -124,12 +128,12 @@ async function runSnapshotOn(fileName) {
     // 3. Mock timers to execute super fast/instantly to speed up polling/sleep
     const originalSetTimeout = window.setTimeout;
     window.setTimeout = (callback, delay) => {
-        return originalSetTimeout(callback, 0); // instantly execute
+        return originalSetTimeout(callback, delay > 0 ? 1 : 0); // quickly execute
     };
 
     const originalSetInterval = window.setInterval;
     window.setInterval = (callback, delay) => {
-        return originalSetInterval(callback, 0); // instantly execute
+        return originalSetInterval(callback, delay > 0 ? 1 : 0); // quickly execute without starving JSDOM
     };
 
     // 4. Mock Date.now to automatically advance time to prevent 12-second busy spins inside the wait loops
